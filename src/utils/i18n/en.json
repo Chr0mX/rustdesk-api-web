@@ -370,6 +370,30 @@
   "AuditFileLog": {
     "One": "File Log"
   },
+  "AuditAdminActionLog": {
+    "One": "Admin Action Log"
+  },
+  "Operator": {
+    "One": "Operator"
+  },
+  "Module": {
+    "One": "Module"
+  },
+  "Action": {
+    "One": "Action"
+  },
+  "Method": {
+    "One": "Method"
+  },
+  "Success": {
+    "One": "Success"
+  },
+  "Yes": {
+    "One": "Yes"
+  },
+  "No": {
+    "One": "No"
+  },
   "Common": {
     "One": "Common"
   },
