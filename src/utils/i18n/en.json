@@ -555,5 +555,38 @@
   },
   "Remark": {
     "One": "Remark"
+  },
+  "Settings": {
+    "One": "Settings"
+  },
+  "Keypair": {
+    "One": "Keypair"
+  },
+  "License": {
+    "One": "License"
+  },
+  "PrivateKey": {
+    "One": "Private Key"
+  },
+  "PublicKey": {
+    "One": "Public Key"
+  },
+  "Reset": {
+    "One": "Reset"
+  },
+  "Custom": {
+    "One": "Custom"
+  },
+  "EditKey": {
+    "One": "Edit Key"
+  },
+  "PleaseInputPrivateKey": {
+    "One": "Please input your private key!"
+  },
+  "KeyUpdatedTip": {
+    "One": "Key has been updated successfully. If hbbr runs on a different machine or port, please update it there manually."
+  },
+  "ComingSoon": {
+    "One": "This page is coming soon."
   }
 }

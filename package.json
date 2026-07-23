@@ -1,5 +1,5 @@
 {
-  "name": "hello-vue3",
+  "name": "rustdesk-api-web",
   "version": "0.0.0",
   "scripts": {
     "dev": "vite --host",

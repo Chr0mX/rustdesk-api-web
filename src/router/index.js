@@ -210,6 +210,27 @@ export const asyncRoutes = [
       },
     ],
   },
+  {
+    path: '/settings',
+    name: 'Settings',
+    redirect: '/settings/keypair',
+    meta: { title: 'Settings', icon: 'Management' },
+    component: () => import('@/layout/index.vue'),
+    children: [
+      {
+        path: 'keypair',
+        name: 'SettingsKeypair',
+        meta: { title: 'Keypair', icon: 'Key' /*keepAlive: true*/ },
+        component: () => import('@/views/settings/keypair.vue'),
+      },
+      {
+        path: 'license',
+        name: 'SettingsLicense',
+        meta: { title: 'License', icon: 'Document' /*keepAlive: true*/ },
+        component: () => import('@/views/settings/license.vue'),
+      },
+    ],
+  },
 ]
 export const lastRoutes = [
   { path: '/:catchAll(.*)', redirect: '/404', meta: { hide: true } },

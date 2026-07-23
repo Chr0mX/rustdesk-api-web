@@ -547,5 +547,38 @@
   },
   "Remark": {
     "One": "备注"
+  },
+  "Settings": {
+    "One": "系统设置"
+  },
+  "Keypair": {
+    "One": "密钥对"
+  },
+  "License": {
+    "One": "许可证"
+  },
+  "PrivateKey": {
+    "One": "私钥"
+  },
+  "PublicKey": {
+    "One": "公钥"
+  },
+  "Reset": {
+    "One": "重置"
+  },
+  "Custom": {
+    "One": "自定义"
+  },
+  "EditKey": {
+    "One": "编辑密钥"
+  },
+  "PleaseInputPrivateKey": {
+    "One": "请输入私钥！"
+  },
+  "KeyUpdatedTip": {
+    "One": "密钥已更新成功。如果 hbbr 运行在其他机器或端口，请手动更新。"
+  },
+  "ComingSoon": {
+    "One": "该页面即将上线。"
   }
 }
