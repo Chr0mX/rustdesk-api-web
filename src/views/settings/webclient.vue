@@ -18,14 +18,26 @@
         <el-form-item :label="T('WebclientIdServer')">
           <el-input
               v-model="form.webclient_id_server"
-              :placeholder="cardForm.id_server || T('WebclientServerNoOverride')"
+              :placeholder="T('WebclientServerPlaceholderExample')"
           />
+          <div class="effective-value-hint">
+            {{ T('WebclientServerCurrentlyEffective') }}:
+            <strong>{{ form.webclient_id_server || cardForm.id_server }}</strong>
+            <el-tag v-if="form.webclient_id_server" size="small" type="success">{{ T('WebclientServerOverrideActive') }}</el-tag>
+            <el-tag v-else size="small">{{ T('WebclientServerNoOverride') }}</el-tag>
+          </div>
         </el-form-item>
         <el-form-item :label="T('WebclientRelayServer')">
           <el-input
               v-model="form.webclient_relay_server"
-              :placeholder="cardForm.relay_server || T('WebclientServerNoOverride')"
+              :placeholder="T('WebclientServerPlaceholderExample')"
           />
+          <div class="effective-value-hint">
+            {{ T('WebclientServerCurrentlyEffective') }}:
+            <strong>{{ form.webclient_relay_server || cardForm.relay_server }}</strong>
+            <el-tag v-if="form.webclient_relay_server" size="small" type="success">{{ T('WebclientServerOverrideActive') }}</el-tag>
+            <el-tag v-else size="small">{{ T('WebclientServerNoOverride') }}</el-tag>
+          </div>
         </el-form-item>
 
         <el-form-item>
@@ -73,3 +85,18 @@
     }
   }
 </script>
+
+<style scoped>
+.effective-value-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.effective-value-hint strong {
+  color: var(--el-text-color-primary);
+  margin-right: 6px;
+}
+.effective-value-hint .el-tag {
+  margin-left: 6px;
+}
+</style>

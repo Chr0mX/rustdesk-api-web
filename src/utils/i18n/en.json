@@ -610,6 +610,15 @@
   "WebclientServerNoOverride": {
     "One": "No override - inherits the server-wide value"
   },
+  "WebclientServerPlaceholderExample": {
+    "One": "e.g. 203.0.113.5:21116 (blank = no override)"
+  },
+  "WebclientServerCurrentlyEffective": {
+    "One": "What the webclient will actually use"
+  },
+  "WebclientServerOverrideActive": {
+    "One": "override active"
+  },
   "SaveSuccess": {
     "One": "Saved successfully."
   }
