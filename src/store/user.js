@@ -4,6 +4,7 @@ import { setToken, removeToken, setCode, removeCode } from '@/utils/auth'
 import { useRouteStore } from '@/store/router'
 import { useAppStore } from '@/store/app'
 import { oidcAuth, oidcQuery } from '@/api/login'
+import { webclientSession } from '@/api/config'
 
 export const useUserStore = defineStore({
   id: 'user',
@@ -38,6 +39,10 @@ export const useUserStore = defineStore({
       if (userData.route_names && userData.route_names.length) {
         useRouteStore().addRoutes(userData.route_names)
       }
+      // Best-effort: bridges the admin console session to the (possibly
+      // separately-hosted) webclient, see App.WebclientCookieDomain. Never
+      // block login on this.
+      webclientSession().catch(() => {})
     },
 
     async login (form) {
