@@ -1,13 +1,25 @@
 $basicBlack: #000000;
 $basicWhite: #ffffff;
 
-$primaryColor: #409eff;
+// Matches the webclient's own branding blue (and the design mockup in
+// TODO.md) instead of Element Plus's stock default (#409eff).
+$primaryColor: #1677ff;
 
 :root {
   --basicBlack: #000000;
   --basicWhite: #ffffff;
-  --primaryColor: #409eff;
+  --primaryColor: #1677ff;
   --tag-bg-color: #efefef;
+
+  // Element Plus derives its hover/active/disabled shades from these -
+  // overriding just --el-color-primary isn't enough on its own.
+  --el-color-primary: #1677ff;
+  --el-color-primary-light-3: #4b96ff;
+  --el-color-primary-light-5: #71acff;
+  --el-color-primary-light-7: #9cc4ff;
+  --el-color-primary-light-8: #b8d4ff;
+  --el-color-primary-light-9: #d4e4ff;
+  --el-color-primary-dark-2: #1265d1;
 }
 
 body {
