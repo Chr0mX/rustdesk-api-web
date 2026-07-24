@@ -20,3 +20,14 @@ export function admin () {
     method: 'get',
   })
 }
+
+// updateWebclientConfig forces (blank values un-force) the id-server/
+// relay-server the bundled webclient is handed, independent of what
+// native clients get.
+export function updateWebclientConfig (data) {
+  return request({
+    url: '/config/webclient',
+    method: 'post',
+    data,
+  })
+}

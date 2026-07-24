@@ -224,6 +224,12 @@ export const asyncRoutes = [
         component: () => import('@/views/settings/keypair.vue'),
       },
       {
+        path: 'webclient',
+        name: 'SettingsWebclient',
+        meta: { title: 'WebclientServer', icon: 'Monitor' /*keepAlive: true*/ },
+        component: () => import('@/views/settings/webclient.vue'),
+      },
+      {
         path: 'license',
         name: 'SettingsLicense',
         meta: { title: 'License', icon: 'Document' /*keepAlive: true*/ },

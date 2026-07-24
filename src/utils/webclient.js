@@ -4,6 +4,7 @@ import * as message from '@/utils/webclient/message'
 import { ElMessageBox } from 'element-plus'
 import { T } from '@/utils/i18n'
 import { useAppStore } from '@/store/app'
+import { getToken } from '@/utils/auth'
 
 
 
@@ -13,7 +14,16 @@ export const toWebClientLink = (row) => {
   // webclient2 was removed upstream (DMCA takedown). The server now bundles
   // a single client (a current v2-style build) at /webclient/, replacing
   // the old v1 (flutter_hbb) build that used to live there.
-  window.open(`${app.setting.rustdeskConfig.api_server}/webclient/#/${row.id}`)
+  //
+  // The server only hands out the real id-server/relay-server/api-server/
+  // key (see rustdesk-api's ConfigJs + middleware.WebclientAuth) to
+  // visitors who show up with a valid api-token or share_token - otherwise
+  // those values would be readable by anyone, unauthenticated. Since we're
+  // already logged in here, pass our token along so the webclient actually
+  // gets a working config instead of a blank one.
+  const token = getToken()
+  const query = token ? `?token=${encodeURIComponent(token)}` : ''
+  window.open(`${app.setting.rustdeskConfig.api_server}/webclient/${query}#/${row.id}`)
 }
 
 export async function getPeerSlat (id) {
@@ -95,5 +105,10 @@ export async function getPeerSlat (id) {
 }
 
 export function getV2ShareUrl (token) {
-  return `${app.setting.rustdeskConfig.api_server}/webclient/#/?share_token=${token}`
+  // share_token has to be a real query param (before the #), not part of
+  // the SPA hash route: the server's auth gate (middleware.WebclientAuth)
+  // reads it off the request's query string to decide whether to hand out
+  // the real id-server/relay-server/key, and fragments are never sent to
+  // the server at all.
+  return `${app.setting.rustdeskConfig.api_server}/webclient/?share_token=${token}#/`
 }
