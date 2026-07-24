@@ -63,13 +63,22 @@ service.interceptors.response.use(
 
     // if the custom code is not 20000, it is judged as an error.
     if (res.code !== 0) {
-      ElMessage({
-        message: res.message || 'error',
-        type: 'error',
-        duration: 5 * 1000,
-      })
+      if (!response.config.silentError) {
+        ElMessage({
+          message: res.message || 'error',
+          type: 'error',
+          duration: 5 * 1000,
+        })
+      }
 
-      if (res.code === 403) {
+      // A 403 here normally means an existing session went bad, so we
+      // clear it and reload to bounce back to the login screen. But
+      // webclientBridge (see api/config.js) is a background probe that's
+      // *expected* to 403 for most visitors - it's not logged in yet, that's
+      // the whole question it's asking - and it's called unconditionally on
+      // every page load before any token exists. Without skipAuthReload,
+      // every anonymous page load would reload the page, forever.
+      if (res.code === 403 && !response.config.skipAuthReload) {
         removeToken()
         window.location.reload()
       }
