@@ -595,17 +595,23 @@
   "RelayServer": {
     "One": "Relay Server"
   },
+  "ApiServer": {
+    "One": "API Server"
+  },
   "WebclientServer": {
     "One": "Webclient Server"
   },
   "WebclientIdServer": {
     "One": "Webclient ID Server (override)"
   },
+  "WebclientApiServer": {
+    "One": "Webclient API Server (override)"
+  },
   "WebclientRelayServer": {
     "One": "Webclient Relay Server (override)"
   },
   "WebclientServerOverrideTip": {
-    "One": "Force the bundled webclient to use a different ID/Relay server than native clients. Leave a field blank to have it inherit the server-wide value shown above."
+    "One": "Force the bundled webclient to use a different ID/Relay/API server than native clients. Leave a field blank to have it inherit the server-wide value shown above."
   },
   "WebclientServerNoOverride": {
     "One": "No override - inherits the server-wide value"

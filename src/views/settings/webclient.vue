@@ -12,6 +12,9 @@
         <el-form-item :label="T('RelayServer')">
           <el-input v-model="cardForm.relay_server" disabled/>
         </el-form-item>
+        <el-form-item :label="T('ApiServer')">
+          <el-input v-model="cardForm.api_server" disabled/>
+        </el-form-item>
 
         <el-divider/>
 
@@ -24,6 +27,18 @@
             {{ T('WebclientServerCurrentlyEffective') }}:
             <strong>{{ form.webclient_id_server || cardForm.id_server }}</strong>
             <el-tag v-if="form.webclient_id_server" size="small" type="success">{{ T('WebclientServerOverrideActive') }}</el-tag>
+            <el-tag v-else size="small">{{ T('WebclientServerNoOverride') }}</el-tag>
+          </div>
+        </el-form-item>
+        <el-form-item :label="T('WebclientApiServer')">
+          <el-input
+              v-model="form.webclient_api_server"
+              :placeholder="T('WebclientServerPlaceholderExample')"
+          />
+          <div class="effective-value-hint">
+            {{ T('WebclientServerCurrentlyEffective') }}:
+            <strong>{{ form.webclient_api_server || cardForm.api_server }}</strong>
+            <el-tag v-if="form.webclient_api_server" size="small" type="success">{{ T('WebclientServerOverrideActive') }}</el-tag>
             <el-tag v-else size="small">{{ T('WebclientServerNoOverride') }}</el-tag>
           </div>
         </el-form-item>
@@ -74,20 +89,25 @@
   const form = reactive({
     webclient_id_server: '',
     webclient_relay_server: '',
+    webclient_api_server: '',
     webclient_relay_from_api_server: false,
   })
 
   // Best-effort client-side preview of what EffectiveWebclientRelayServer
   // (rustdesk-api's config/rustdesk.go) will actually compute - falls back
-  // to the plain relay-server display if api_server isn't a parseable URL,
-  // same as the server-side logic does.
+  // to the plain relay-server display if the effective api-server isn't a
+  // parseable URL, same as the server-side logic does. Derives from the
+  // *effective* webclient api-server (override if set, else the plain
+  // one), matching EffectiveWebclientRelayServer using
+  // EffectiveWebclientApiServer rather than the raw ApiServer.
   const effectiveRelayServer = computed(() => {
     if (form.webclient_relay_server) {
       return form.webclient_relay_server
     }
     if (form.webclient_relay_from_api_server) {
       try {
-        const apiHost = new URL(cardForm.api_server).hostname
+        const effectiveApiServer = form.webclient_api_server || cardForm.api_server
+        const apiHost = new URL(effectiveApiServer).hostname
         const relayPort = (cardForm.relay_server.split(':')[1]) || '21117'
         if (apiHost) {
           return `${apiHost}:${relayPort}`
@@ -107,6 +127,7 @@
       cardForm.api_server = res.data.api_server
       form.webclient_id_server = res.data.webclient_id_server
       form.webclient_relay_server = res.data.webclient_relay_server
+      form.webclient_api_server = res.data.webclient_api_server
       form.webclient_relay_from_api_server = res.data.webclient_relay_from_api_server
     }
     isLoading.value = false
