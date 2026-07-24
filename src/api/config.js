@@ -31,3 +31,17 @@ export function updateWebclientConfig (data) {
     data,
   })
 }
+
+// webclientSession proactively establishes the webclient's auth session
+// (see rustdesk-api's middleware.WebclientAuth) for the current logged-in
+// user, so opening the webclient afterwards doesn't need a ?token= in the
+// URL. Only actually bridges the two when the server's
+// App.WebclientCookieDomain is set to a domain that covers both the admin
+// console and the webclient (e.g. they're sibling subdomains) - otherwise
+// this is harmless but pointless.
+export function webclientSession () {
+  return request({
+    url: '/config/webclient-session',
+    method: 'post',
+  })
+}
