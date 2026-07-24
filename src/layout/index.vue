@@ -46,10 +46,12 @@
 
 <style lang="scss" scoped>
 .app-header {
-  background-color: #3f454b;
-  color: var(--basicWhite);
+  background-color: var(--el-bg-color);
+  color: var(--el-text-color-primary);
   display: flex;
+  align-items: center;
   height: 50px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .header-tags {
