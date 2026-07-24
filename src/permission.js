@@ -14,12 +14,25 @@ const whiteList = ['/login', '/register']
 const routeStore = useRouteStore(pinia)
 const appStore = useAppStore(pinia)
 appStore.getAdminConfig()
+
+// Only worth trying once per app load: if there's a webclient session
+// cookie tied to an admin account (see App.WebclientCookieDomain), it logs
+// us in without a password; otherwise it's a cheap no-op every time.
+let triedWebclientBridge = false
+
 router.beforeEach(async (to, from, next) => {
 
   document.title = T(to.meta?.title) + ' - ' + appStore.setting.title
   NProgress.start()
 
-  const token = getToken()
+  let token = getToken()
+  if (!token && !triedWebclientBridge) {
+    triedWebclientBridge = true
+    const userStore = useUserStore(pinia)
+    if (await userStore.tryWebclientBridge()) {
+      token = getToken()
+    }
+  }
   if (!token) {
     //无token，跳转到登录
     if (whiteList.indexOf(to.path) !== -1) {

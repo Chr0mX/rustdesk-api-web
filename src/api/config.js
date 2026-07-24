@@ -45,3 +45,15 @@ export function webclientSession () {
     method: 'post',
   })
 }
+
+// webclientBridge is the reverse: if the visitor already holds a webclient
+// session cookie (opened the webclient first) and it's tied to an admin
+// account, this logs them into _admin without a password. Deliberately not
+// authed by the request interceptor (no api-token exists yet at this
+// point) - relies entirely on the wc_sess cookie.
+export function webclientBridge () {
+  return request({
+    url: '/config/webclient-bridge',
+    method: 'get',
+  })
+}
