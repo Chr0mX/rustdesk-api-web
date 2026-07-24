@@ -31,13 +31,23 @@
           <el-input
               v-model="form.webclient_relay_server"
               :placeholder="T('WebclientServerPlaceholderExample')"
+              :disabled="form.webclient_relay_from_api_server"
           />
           <div class="effective-value-hint">
             {{ T('WebclientServerCurrentlyEffective') }}:
-            <strong>{{ form.webclient_relay_server || cardForm.relay_server }}</strong>
+            <strong>{{ effectiveRelayServer }}</strong>
             <el-tag v-if="form.webclient_relay_server" size="small" type="success">{{ T('WebclientServerOverrideActive') }}</el-tag>
+            <el-tag v-else-if="form.webclient_relay_from_api_server" size="small" type="warning">{{ T('WebclientServerDerivedFromApi') }}</el-tag>
             <el-tag v-else size="small">{{ T('WebclientServerNoOverride') }}</el-tag>
           </div>
+          <el-checkbox
+              v-model="form.webclient_relay_from_api_server"
+              :disabled="!!form.webclient_relay_server"
+              style="margin-top: 8px;"
+          >
+            {{ T('WebclientServerRelayFromApiToggle') }}
+          </el-checkbox>
+          <div class="effective-value-hint">{{ T('WebclientServerRelayFromApiTip') }}</div>
         </el-form-item>
 
         <el-form-item>
@@ -49,7 +59,7 @@
 </template>
 
 <script setup>
-  import { onMounted, reactive, ref } from 'vue'
+  import { computed, onMounted, reactive, ref } from 'vue'
   import { ElMessage } from 'element-plus'
   import { T } from '@/utils/i18n'
   import { server as getServerConfig, updateWebclientConfig } from '@/api/config'
@@ -59,10 +69,34 @@
   const cardForm = reactive({
     id_server: '',
     relay_server: '',
+    api_server: '',
   })
   const form = reactive({
     webclient_id_server: '',
     webclient_relay_server: '',
+    webclient_relay_from_api_server: false,
+  })
+
+  // Best-effort client-side preview of what EffectiveWebclientRelayServer
+  // (rustdesk-api's config/rustdesk.go) will actually compute - falls back
+  // to the plain relay-server display if api_server isn't a parseable URL,
+  // same as the server-side logic does.
+  const effectiveRelayServer = computed(() => {
+    if (form.webclient_relay_server) {
+      return form.webclient_relay_server
+    }
+    if (form.webclient_relay_from_api_server) {
+      try {
+        const apiHost = new URL(cardForm.api_server).hostname
+        const relayPort = (cardForm.relay_server.split(':')[1]) || '21117'
+        if (apiHost) {
+          return `${apiHost}:${relayPort}`
+        }
+      } catch (_) {
+        // not a parseable URL - fall through to plain relay_server below
+      }
+    }
+    return cardForm.relay_server
   })
 
   const fetchConfig = async () => {
@@ -70,8 +104,10 @@
     if (res) {
       cardForm.id_server = res.data.id_server
       cardForm.relay_server = res.data.relay_server
+      cardForm.api_server = res.data.api_server
       form.webclient_id_server = res.data.webclient_id_server
       form.webclient_relay_server = res.data.webclient_relay_server
+      form.webclient_relay_from_api_server = res.data.webclient_relay_from_api_server
     }
     isLoading.value = false
   }
