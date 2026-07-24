@@ -8,6 +8,21 @@ export function login (data) {
   })
 }
 
+// logout tells the backend to invalidate this session - notably, it also
+// revokes any webclient session tied to this login (see rustdesk-api's
+// middleware.RevokeWebclientSession), so a webclient tab that had picked
+// up id-server/relay-server/key from this account stops working and gets
+// them cleared on its next load. Silent on failure: local logout
+// (userStore.logout, which always clears the local token) should still go
+// through even if this call doesn't reach the server.
+export function logout () {
+  return request({
+    url: '/logout',
+    method: 'post',
+    silentError: true,
+  })
+}
+
 export function current () {
   return request({
     url: '/user/current',

@@ -1,5 +1,5 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
-import { current, login } from '@/api/user'
+import { current, login, logout as logoutApi } from '@/api/user'
 import { setToken, removeToken, setCode, removeCode } from '@/utils/auth'
 import { useRouteStore } from '@/store/router'
 import { useAppStore } from '@/store/app'
@@ -20,6 +20,14 @@ export const useUserStore = defineStore({
 
   actions: {
     logout () {
+      // Best-effort, fire-and-forget: tells the backend to revoke this
+      // session, which also revokes any webclient session tied to it (see
+      // rustdesk-api's middleware.RevokeWebclientSession) - without this
+      // call, logging out here never actually reached the server, so a
+      // still-open webclient tab (or the session cookie alone) kept
+      // working after "logout". Local logout below always happens
+      // immediately regardless of whether this succeeds.
+      logoutApi().catch(() => {})
       removeToken()
       removeCode()
       this.$patch({
