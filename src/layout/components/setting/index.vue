@@ -98,7 +98,7 @@
   }
 
   .title {
-    color: #fff;
+    color: var(--el-text-color-primary);
     display: flex;
     align-items: center;
     justify-content: space-around;
