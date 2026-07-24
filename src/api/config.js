@@ -51,9 +51,18 @@ export function webclientSession () {
 // account, this logs them into _admin without a password. Deliberately not
 // authed by the request interceptor (no api-token exists yet at this
 // point) - relies entirely on the wc_sess cookie.
+//
+// silentError + skipAuthReload: this runs unconditionally on every
+// anonymous page load (see permission.js) and 403s for the ordinary case
+// of "not logged in yet" - without these it'd pop an error toast, and
+// worse, trip the interceptor's "403 = stale session, reload the page"
+// handling on every single visit, which reloads forever since that reset
+// the one-shot guard in permission.js right along with it.
 export function webclientBridge () {
   return request({
     url: '/config/webclient-bridge',
     method: 'get',
+    silentError: true,
+    skipAuthReload: true,
   })
 }
