@@ -10,9 +10,9 @@ import { useAppStore } from '@/store/app'
 const app = useAppStore()
 
 export const toWebClientLink = (row) => {
-  //v2
-  console.log(app.setting.rustdeskConfig)
-  window.open(`${app.setting.rustdeskConfig.api_server}/webclient2/#/${row.id}`)
+  // webclient2 was removed upstream (DMCA takedown); only the v1
+  // (flutter_hbb) webclient at /webclient/ actually ships.
+  window.open(`${app.setting.rustdeskConfig.api_server}/webclient/#/${row.id}`)
 }
 
 export async function getPeerSlat (id) {
