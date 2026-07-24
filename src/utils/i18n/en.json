@@ -619,6 +619,15 @@
   "WebclientServerOverrideActive": {
     "One": "override active"
   },
+  "WebclientServerDerivedFromApi": {
+    "One": "derived from API server"
+  },
+  "WebclientServerRelayFromApiToggle": {
+    "One": "Derive relay server from API server's host instead"
+  },
+  "WebclientServerRelayFromApiTip": {
+    "One": "Useful when hbbs/hbbr only have a LAN address but the API server is the WAN-reachable one - keeps the relay server's port, swaps in the API server's host. Only applies when the field above is blank."
+  },
   "SaveSuccess": {
     "One": "Saved successfully."
   }
