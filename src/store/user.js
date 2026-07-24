@@ -4,7 +4,7 @@ import { setToken, removeToken, setCode, removeCode } from '@/utils/auth'
 import { useRouteStore } from '@/store/router'
 import { useAppStore } from '@/store/app'
 import { oidcAuth, oidcQuery } from '@/api/login'
-import { webclientSession } from '@/api/config'
+import { webclientSession, webclientBridge } from '@/api/config'
 
 export const useUserStore = defineStore({
   id: 'user',
@@ -43,6 +43,22 @@ export const useUserStore = defineStore({
       // separately-hosted) webclient, see App.WebclientCookieDomain. Never
       // block login on this.
       webclientSession().catch(() => {})
+    },
+
+    // Reverse of webclientSession: if a webclient session cookie already
+    // identifies an admin (see App.WebclientCookieDomain), logs them into
+    // _admin without a password. Returns false (never throws) if there's no
+    // such session, it's not tied to an admin, or the cookie can't reach
+    // this host at all - all of those are just "not logged in", not errors.
+    async tryWebclientBridge () {
+      const res = await webclientBridge().catch(_ => false)
+      if (res) {
+        useAppStore().loadConfig()
+        const userData = res.data
+        this.saveUserData(userData)
+        return userData
+      }
+      return false
     },
 
     async login (form) {
