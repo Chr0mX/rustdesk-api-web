@@ -10,8 +10,9 @@ import { useAppStore } from '@/store/app'
 const app = useAppStore()
 
 export const toWebClientLink = (row) => {
-  // webclient2 was removed upstream (DMCA takedown); only the v1
-  // (flutter_hbb) webclient at /webclient/ actually ships.
+  // webclient2 was removed upstream (DMCA takedown). The server now bundles
+  // a single client (a current v2-style build) at /webclient/, replacing
+  // the old v1 (flutter_hbb) build that used to live there.
   window.open(`${app.setting.rustdeskConfig.api_server}/webclient/#/${row.id}`)
 }
 
@@ -94,5 +95,5 @@ export async function getPeerSlat (id) {
 }
 
 export function getV2ShareUrl (token) {
-  return `${app.setting.rustdeskConfig.api_server}/webclient2/#/?share_token=${token}`
+  return `${app.setting.rustdeskConfig.api_server}/webclient/#/?share_token=${token}`
 }
