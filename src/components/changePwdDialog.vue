@@ -108,8 +108,8 @@
     ElMessageBox.alert(T('OperationSuccess'), T('ChangePassword'), {
       autofocus: true,
       confirmButtonText: 'OK',
-      callback: (action) => {
-        userStore.logout()
+      callback: async (action) => {
+        await userStore.logout()
         window.location.reload()
       },
     })

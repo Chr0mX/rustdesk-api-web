@@ -12,6 +12,7 @@ export function setToken (token) {
 }
 
 export function removeToken () {
+  localStorage.removeItem(`wc-option:local:access_token`)
   return localStorage.removeItem(TokenKey)
 }
 
