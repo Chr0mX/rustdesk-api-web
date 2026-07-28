@@ -19,19 +19,19 @@ export const useUserStore = defineStore({
   }),
 
   actions: {
-    logout () {
-      // Best-effort, fire-and-forget: tells the backend to revoke this
-      // session, which also revokes any webclient session tied to it (see
-      // rustdesk-api's middleware.RevokeWebclientSession) - without this
-      // call, logging out here never actually reached the server, so a
-      // still-open webclient tab (or the session cookie alone) kept
-      // working after "logout". Local logout below always happens
-      // immediately regardless of whether this succeeds.
-      logoutApi().catch(() => {})
+    // Awaits the revoke call (callers should await this before navigating
+    // away/reloading) so the request actually leaves the browser instead of
+    // being torn down mid-flight by an immediate reload - which would
+    // silently defeat the server-side webclient-session revocation this is
+    // here for. Local logout still always happens regardless of whether the
+    // call succeeds.
+    async logout () {
+      await logoutApi().catch(() => {})
       removeToken()
       removeCode()
       this.$patch({
         name: '',
+        token: '',
         role: {},
       })
     },
