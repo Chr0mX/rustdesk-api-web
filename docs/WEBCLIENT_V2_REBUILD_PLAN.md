@@ -2,12 +2,16 @@
 
 ## Goal
 
-Replace the compiled/vendored webclient bundle (`resources/web` in `rustdesk-api`,
-currently patched by hand per `resources/web/PATCHES.md`) with a from-source
-Vue 3 implementation living in `rustdesk-api-web`, styled to match Ant Design
-Pro's visual language (same approach as the `_admin`/login restyle already
-done), so the whole thing is finally something we can actually read, test,
-and fix instead of hex-patching a black box.
+Replace the legacy compiled webclient (`resources/web` in `rustdesk-api`,
+currently patched by hand per `resources/web/PATCHES.md`) with a fully
+source-available Vue 3 implementation living in `rustdesk-api-web`, styled
+to match Ant Design Pro's visual language (same approach as the
+`_admin`/login restyle already done), that achieves **feature parity with
+the legacy webclient before `/webclient` is repointed** to it. The goal is a
+true replacement, not a minimum viable one - so the whole thing is finally
+something we can actually read, test, and fix instead of hex-patching a
+black box, without asking users to fall back to the legacy client for
+anything they could already do.
 
 This does **not** mean rewriting a remote-desktop engine from scratch. See
 "Why this is tractable" below - we have a real, recovered starting point for
@@ -37,21 +41,56 @@ Investigated this via `rustdesk/rustdesk`'s git history (see session notes):
 
 ## Scope / non-goals
 
-- In scope: peer-list dashboard, Settings (General/Network/Display/Account),
-  connecting to a peer, video/audio playback, keyboard/mouse input, the
-  account login/logout flows this session already wired up server-side.
-- Out of scope for v1 of this effort: file transfer, terminal, and any
-  feature not already present in the recovered `v1` source, unless it turns
-  out the current compiled bundle relies on the backend for something we'd
-  otherwise silently drop. Each such gap gets called out explicitly during
-  Phase 2, not discovered in production.
-- Out of scope entirely: touching `Chr0mX/rustdesk` (the native client fork).
-  Nothing in this plan currently requires it (see protocol-layer point
-  above). If a real need surfaces (e.g. we need `client.rs`-derived
-  constants like `KEY_MAP`/`checkIfRetry` that `v1`'s `gen_js_from_hbb.py`
-  pulled live from that repo), the plan is to vendor a small, hand-copied
-  snapshot of just those constants into `rustdesk-api-web`, not take on a
-  live cross-repo source dependency on a repo we don't otherwise touch.
+In scope: every user-facing capability currently available in the legacy
+webclient, including:
+
+- Peer dashboard
+- Settings
+- Login/logout
+- Remote desktop
+- Keyboard/mouse input
+- Multi-monitor
+- Clipboard
+- Audio
+- File transfer
+- Terminal
+- Any additional user-facing features present in the legacy client
+
+Features may be implemented incrementally across phases (see Phase 4/5
+below), but **Phase 6 (Cutover) is blocked until feature parity is reached,
+or any intentional omissions are explicitly approved.** This replaces the
+earlier, narrower framing of this section, which scoped file transfer and
+terminal out entirely - that risked a silent feature regression the moment
+`/webclient` got repointed at the new client.
+
+Accuracy note on two specific items, so this plan doesn't overstate how
+"portable" parity work is: **file transfer and terminal are not present in
+the recovered `v1` source** - `v1`'s `connection.ts` has no file-transfer
+methods at all, and terminal support didn't exist in the Flutter client
+*until after* `v1` was last touched (it was added in the same commit,
+`5faf0ad3`, that deleted `flutter/web` from upstream). Both therefore need
+**net-new implementation** against the ported transport/protocol layer, not
+a port of existing `v1` code - call this out explicitly in Phase 5 planning
+rather than assuming it's a straightforward carry-over.
+
+Out of scope entirely: touching `Chr0mX/rustdesk` (the native client fork).
+Nothing in this plan currently requires it (see protocol-layer point
+above). If a real need surfaces (e.g. we need `client.rs`-derived
+constants like `KEY_MAP`/`checkIfRetry` that `v1`'s `gen_js_from_hbb.py`
+pulled live from that repo), the plan is to vendor a small, hand-copied
+snapshot of just those constants into `rustdesk-api-web`, not take on a
+live cross-repo source dependency on a repo we don't otherwise touch.
+
+## Success criteria
+
+The Vue webclient is considered complete only when it can replace the
+legacy compiled webclient for everyday use, without requiring users to
+return to the legacy interface for any existing feature. The legacy
+webclient remains available only as an optional, administrator-controlled
+fallback during the transition period (see Phase 0 and Phase 6). Whatever
+is in the legacy webclient will be in the Vue rewrite - achieving parity
+before cutover avoids running two different clients that users have to
+switch between depending on which feature they need.
 
 ## Repo split
 
@@ -59,7 +98,7 @@ Investigated this via `rustdesk/rustdesk`'s git history (see session notes):
 |---|---|---|
 | Everything below (transport, protocol codegen consuming hbb_common's protos, connection logic, codec, UI) | `rustdesk-api-web` | Per instruction: default location unless there's a specific reason not to. |
 | Read-only source of `.proto` files for codegen | `rustdesk-server` (`libs/hbb_common/protos/*.proto`) | Already vendored there; no changes needed to that repo, just read its files at our build time (e.g. a small script/submodule reference, or a one-time vendored copy re-synced when hbb_common bumps). |
-| Legacy-slug route + admin toggle (Phase 0), and later the `/webclient/*` route swap (Phase 5) | `rustdesk-api` | The Go backend owns routing. Phase 0 adds a new config-gated path serving today's compiled bundle unchanged; Phase 5 later points `router.go`'s `wc.StaticFS(...)` for the canonical `/webclient/` path at the new build's output instead. Neither is new logic - `ConfigJs`, `WebclientAuth`, `WebclientLogin`/`WebclientLogout`, and the wc_sess session model all stay exactly as they are today. |
+| Legacy-slug route + admin toggle (Phase 0), and later the `/webclient/*` route swap (Phase 6) | `rustdesk-api` | The Go backend owns routing. Phase 0 adds a new config-gated path serving today's compiled bundle unchanged; Phase 6 later points `router.go`'s `wc.StaticFS(...)` for the canonical `/webclient/` path at the new build's output instead. Neither is new logic - `ConfigJs`, `WebclientAuth`, `WebclientLogin`/`WebclientLogout`, and the wc_sess session model all stay exactly as they are today. |
 
 ## Phases
 
@@ -68,7 +107,7 @@ Investigated this via `rustdesk/rustdesk`'s git history (see session notes):
 Ships **before** any rebuild investigation starts. Small, standalone,
 immediately useful on its own regardless of whether the rest of this plan
 ever ships - and it's a cheap rehearsal of the exact routing touchpoint
-Phase 5 (Cutover) needs anyway.
+Phase 6 (Cutover) needs anyway.
 
 - `rustdesk-api` (Go): add `app.webclient-legacy-enabled` (bool, default
   `true`) and `app.webclient-legacy-path` (string, default e.g.
@@ -82,7 +121,7 @@ Phase 5 (Cutover) needs anyway.
   current compiled bundle exactly as it does today, at its current URL, so
   nothing breaks for existing bookmarks/links while this ships. The new
   legacy slug is purely additive for now; `/webclient/` only gets
-  repointed at the new Vue app later, in Phase 5.
+  repointed at the new Vue app later, in Phase 6.
 - `rustdesk-api-web`: add the on/off toggle to the existing webclient
   settings page (`src/views/settings/webclient.vue`), same pattern as the
   other webclient config fields already there (`updateWebclientConfig` in
@@ -102,7 +141,7 @@ a real open question from this session, not busywork:
    `WebSock.onopen`/`custom-config script tag not found` from `index.js`).
    Determine whether `main.dart.js` is still load-bearing for anything the
    new Vue app needs to replace, or whether it's vestigial/unused in
-   practice. This determines whether Phase 2-4 is a full replacement or
+   practice. This determines whether Phase 2-5 is a full replacement or
    needs to keep something Flutter-shaped around.
 2. **Confirm `hbbs`'s WebSocket endpoint behavior against `v1`'s wire
    assumptions.** `v1` connects via `Websock` to a rendezvous/relay
@@ -155,7 +194,7 @@ before Phase 2 work starts.
 - Audio: `v1` used `pcm-player`; confirm this (or an equivalent) still
   covers what's needed for the audio format `hbbs`/peers currently send.
 
-### Phase 4 - UI (Vue 3 + Element Plus, Ant Design Pro visual language)
+### Phase 4 - Core UI & Remote Desktop (Vue 3 + Element Plus, Ant Design Pro visual language)
 
 Net-new work, since `v2`'s UI source was never available to port from:
 
@@ -178,22 +217,60 @@ Net-new work, since `v2`'s UI source was never available to port from:
   applied to `_admin`'s login page and layout shell this session - CSS/
   component-styling work, not a new framework.
 
-### Phase 5 - Cutover
+This phase gets the new client to "connects, shows video, takes input" -
+the same baseline `v1` had. It is **not** parity yet; Phase 5 covers
+everything the legacy compiled bundle can do that `v1` didn't.
 
-- `rustdesk-api`: point `router.go`'s `wc.StaticFS(...)` for `/webclient/`
-  (the canonical path) at the new Vue app's build output instead.
-  `ConfigJs`, `WebclientAuth`, `WebclientLogin`/`WebclientLogout` stay as-is
-  - the new frontend reads the same injected `localStorage` values (or,
-  better, we simplify `ConfigJs` at this point since it won't need to
-  satisfy two different localStorage namespaces anymore - one real win of
-  owning the source).
-- The legacy client needs no changes here at all - it's already living at
-  its own slug with its own admin toggle since Phase 0, so this phase is
-  purely "repoint the canonical URL," not "stand up a fallback path under
-  time pressure." Leave the legacy path enabled by default for at least one
-  release cycle post-cutover, then it's the admin's call whether to keep it
-  around (some deployments may want it available indefinitely as a manual
-  fallback) or disable/remove it.
+### Phase 5 - Feature Parity
+
+Everything the legacy webclient can do that isn't covered by Phase 4's
+baseline. This is where the "in scope" list from the Scope section actually
+gets built out, gated by Phase 6 not starting until it's done (or gaps are
+explicitly signed off):
+
+- **File transfer** - net-new implementation (confirmed absent from `v1`'s
+  `connection.ts`); needs its own protocol messages against the ported
+  transport layer and its own UI (file browser, transfer progress).
+- **Terminal** - net-new implementation (didn't exist in the Flutter client
+  until after `v1` was last touched, per the same commit that deleted
+  `flutter/web`); needs whatever terminal protocol messages the current
+  compiled bundle/hbbs actually use, reverse-engineered the same way the
+  transport layer was for Phase 2, plus a terminal UI (e.g. xterm.js).
+- **Clipboard sync** (if applicable) - confirm whether the legacy client
+  does bidirectional clipboard sync and, if so, implement the matching
+  protocol messages and browser clipboard-API integration.
+- **Remaining legacy features** - anything else surfaced by comparing
+  against the legacy client directly (multi-monitor switching beyond basic
+  display-select, audio routing edge cases, etc.) - call these out
+  explicitly as found rather than discovering them post-cutover.
+- **Compatibility testing** - systematic side-by-side comparison against
+  the legacy client (still available at its Phase 0 slug) for every item in
+  the Scope list, before Phase 6 is allowed to start.
+
+Exit criteria: every item in the Scope section's "in scope" list works in
+the Vue client, or has an explicitly recorded, approved exception appended
+to this doc.
+
+### Phase 6 - Cutover
+
+- Switch `/webclient`: `rustdesk-api` points `router.go`'s
+  `wc.StaticFS(...)` for `/webclient/` (the canonical path) at the new Vue
+  app's build output instead. `ConfigJs`, `WebclientAuth`,
+  `WebclientLogin`/`WebclientLogout` stay as-is - the new frontend reads the
+  same injected `localStorage` values (or, better, we simplify `ConfigJs`
+  at this point since it won't need to satisfy two different localStorage
+  namespaces anymore - one real win of owning the source).
+- Keep legacy path as optional fallback: the legacy client needs no changes
+  here at all - it's already living at its own slug with its own admin
+  toggle since Phase 0, so this phase is purely "repoint the canonical
+  URL," not "stand up a fallback path under time pressure." Leave the
+  legacy path enabled by default for at least one release cycle
+  post-cutover, then it's the admin's call whether to keep it around (some
+  deployments may want it available indefinitely as a manual fallback) or
+  disable/remove it.
+- Regression testing: re-run Phase 5's compatibility pass against the newly
+  repointed `/webclient/` itself (not just the pre-cutover build), since
+  cutover is the point real users hit the new client by default.
 - Once there's confidence the new client is stable and the legacy path is
   disabled for good in a given deployment, `resources/web/PATCHES.md`
   becomes moot for that deployment (nothing compiled left to patch) - but
@@ -208,7 +285,7 @@ Noted for later, not actionable now: since this plan puts the new webclient
 in the *same* Vue 3 + Element Plus codebase as `_admin` (rather than a
 separate framework), merging them into one experience later is a real,
 reachable option - shared routing/nav, shared auth state, no
-framework-porting cost, since it's already one app. Revisit once Phase 5
+framework-porting cost, since it's already one app. Revisit once Phase 6
 ships and the webclient has been stable for a bit; premature to design now.
 
 ## Risks
