@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { useWebclientUserStore } from '@/webclient/store/user'
 
 const routes = [
@@ -20,7 +20,18 @@ const routes = [
 ]
 
 export const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  // Hash history, not createWebHistory(import.meta.env.BASE_URL): this
+  // build's vite.config.js sets base: './' since it's a shared build
+  // served from multiple, not-known-at-build-time mount points
+  // (/webclient-dev/ today, /webclient/ after Phase 6's cutover) - so
+  // BASE_URL resolves to the literal string './', which isn't a valid
+  // history-mode base and silently matches no route. router.go also has
+  // no catch-all fallback for client-side paths (only exact routes for
+  // /webclient-dev/ and /webclient-dev/static/*), so path-based history
+  // would 404 on direct navigation anyway. _admin's own router
+  // (src/router/index.js) already uses createWebHashHistory() for the
+  // same reason - matching that here.
+  history: createWebHashHistory(),
   routes,
 })
 
