@@ -72,6 +72,61 @@ function defaultRendezvousHost () {
   return parts.length > 1 ? parts[0] + ':' + (parseInt(parts[1]) + 2) : host
 }
 
+// rustdesk-api's real hbbs rendezvous port (see config/rustdesk.go's
+// DefaultRelayServerPort-adjacent constants and its own
+// EffectiveWebclientApiServer doc comment's example, "http://121.6.58.12:21114"
+// - that's this exact port minus 2). Deliberately separate from this
+// file's own ID_PORT (21118 - the *websocket* id port getDefaultUri talks
+// to), which is a different +2-offset convention for a different purpose.
+const RENDEZVOUS_PORT = 21116
+
+// Faithful port of the legacy bundled webclient's own `cs(u, e)` (see
+// resources/web/js/dist/index.js) - adjusts a "host[:port]" string's port
+// by `e`, leaving the string unchanged if there's no parseable port to
+// adjust (e.g. a bare domain with no port at all).
+function adjustPort (u, e) {
+  if (isIPv6(u)) {
+    if (u.startsWith('[')) {
+      const parts = u.split(']:')
+      if (parts.length === 2) {
+        const p = parseInt(parts[1]) || 0
+        if (p > 0) return `${parts[0]}]:${p + e}`
+      }
+    }
+  } else if (u.includes(':')) {
+    const parts = u.split(':')
+    if (parts.length === 2) {
+      const p = parseInt(parts[1]) || 0
+      if (p > 0) return `${parts[0]}:${p + e}`
+    }
+  }
+  return u
+}
+
+// Faithful port of the legacy bundled webclient's own `ne()` (see
+// resources/web/js/dist/index.js) - the real implementation behind
+// getByName("api_server"). Every /api/* call the engine makes (address
+// book, etc.) string-concatenates this value directly onto a path, so
+// just returning localStorage's 'api-server' verbatim and giving up when
+// that's unset (as this webclient briefly did) reproduces exactly the
+// malformed-URI failure ("Failed to fetch, uri=///api/ab/...") this ports
+// around: derive a sensible api-server from custom-rendezvous-server (the
+// id-server, which - unlike api-server - is always configured whenever a
+// connection works at all) before falling back further.
+export function getApiServer () {
+  const u = localStorage.getItem('api-server')
+  if (u) return u
+  const e = localStorage.getItem('custom-rendezvous-server')
+  if (e) {
+    const n = adjustPort(e, -2)
+    return n === e ? `http://${n}:${RENDEZVOUS_PORT - 2}` : `http://${n}`
+  }
+  if (typeof window !== 'undefined' && window.location.host.indexOf('localhost:') === 0) {
+    return `http://localhost:${RENDEZVOUS_PORT - 2}`
+  }
+  return typeof window !== 'undefined' ? window.location.origin : ''
+}
+
 export default class CurConn {
   constructor () {
     this._msgs = []

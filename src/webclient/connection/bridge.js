@@ -11,7 +11,7 @@
 // registered BY the Flutter engine itself (see web_model.dart), and
 // globals.js's draw()/pushEvent() call them. This file only owns the
 // Dart -> JS direction.
-import CurConn, { testDelay } from './curConn'
+import CurConn, { testDelay, getApiServer } from './curConn'
 
 let curConn
 
@@ -194,14 +194,14 @@ export function initBridge () {
       // (`"${await bind.mainGetApiServer()}/api/ab/shared/profiles..."`),
       // so an unhandled '' here doesn't fail loudly - it just produces a
       // malformed relative/scheme-less URI ("Failed to fetch,
-      // uri=///api/ab/shared/profiles..."). rustdesk-api's ConfigJs
-      // (http/controller/web/index.go) already seeds this exact value into
-      // localStorage under the plain (unprefixed) key 'api-server' on every
-      // /webclient-config/index.js load - curConn.js's own
-      // 'custom-rendezvous-server' lookup already relies on that same
-      // script, this just reads the sibling key.
+      // uri=///api/ab/shared/profiles..."). A bare localStorage['api-server']
+      // read isn't enough on its own - that key is only populated when the
+      // admin has explicitly configured a separate api-server; getApiServer()
+      // (curConn.js) is the legacy bundle's own fallback chain (derive from
+      // custom-rendezvous-server, then localhost, then same-origin) ported
+      // faithfully, so this works whether or not that override is set.
       case 'api_server':
-        result = localStorage.getItem('api-server') || ''
+        result = getApiServer()
         break
       case 'option:local':
       case 'option:flutter:local':
