@@ -3,14 +3,21 @@
 // TypeScript types to match this project's plain-JS convention. Logic is
 // unchanged from the original.
 //
-// Depends on ./message.js and ./rendezvous.js, which don't exist yet in
-// this tree - they're generated at build time via protoc against
-// rustdesk-server's libs/hbb_common/*.proto (see v1's ts_proto.py; v1 never
-// committed these either, they were always gitignored). This file is
+// Depends on ./message and ./rendezvous, which don't exist yet in this
+// tree - they're generated (as message.ts/rendezvous.ts) at build time via
+// protoc/ts-proto against rustdesk-server's libs/hbb_common/*.proto (see
+// v1's ts_proto.py; v1 never committed these either, they were always
+// gitignored). Imported without an extension, not "./message.js" like v1
+// did - v1 had its own tsconfig.json where a ".js"-suffixed import
+// resolving to a ".ts" file is a normal TS-ESM convention; this plain-JS
+// Vite project has no TypeScript compiler in its resolution pipeline, so
+// an explicit ".js" extension would only ever look for a literal
+// message.js and never find the generated .ts file. See this directory's
+// README.md for the actual protoc/ts-proto command to run. This file is
 // otherwise complete and should work unmodified once that codegen step is
 // wired up as part of Phase 2/4's build.
-import * as message from './message.js'
-import * as rendezvous from './rendezvous.js'
+import * as message from './message'
+import * as rendezvous from './rendezvous'
 import * as globals from './globals'
 
 export default class Websock {

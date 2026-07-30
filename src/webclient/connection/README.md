@@ -37,14 +37,37 @@ web` actually succeeding (there's nothing to embed/test against yet).
 
 This scaffold will not connect to anything yet. In order:
 
-1. **`message.js`/`rendezvous.js` don't exist.** These are protobuf
+1. **`message.ts`/`rendezvous.ts` don't exist.** These are protobuf
    bindings generated at build time via `protoc`/`ts-proto` against
    `rustdesk-server`'s `libs/hbb_common/*.proto` (see v1's `ts_proto.py` -
    `ts-proto` is already in this repo's `package.json` devDependencies).
-   `websock.js`/`curConn.js` import them exactly as v1 did (they were
-   gitignored there too, never committed) - this needs a real codegen step
-   wired into the build, in an environment with `protoc` available (not
-   this sandbox - see the plan doc's Risks section).
+   Confirmed by a real build attempt (not just this sandbox's `node
+   --check`): `vite build` gets through all 1153 other modules and fails
+   exactly here, which is expected - see below for the actual command to
+   run once you have `protoc` and a checkout of `rustdesk-server` handy
+   (needs real network/toolchain access this sandbox doesn't have):
+
+   ```sh
+   # from this repo's root, with protoc installed and rustdesk-server
+   # cloned somewhere - adjust the -I path to wherever that is:
+   protoc \
+     --ts_proto_opt=esModuleInterop=true \
+     --ts_proto_opt=snakeToCamel=false \
+     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+     -I "../rustdesk-server/libs/hbb_common/protos" \
+     --ts_proto_out=./src/webclient/connection/ \
+     rendezvous.proto message.proto
+   ```
+
+   `websock.js`/`curConn.js` import these **without** a `.js` extension
+   (`from './message'`, not `from './message.js'` like v1 wrote it) -
+   fixed after the first real build attempt caught it. v1 had its own
+   `tsconfig.json` where a `.js`-suffixed import resolving to a `.ts` file
+   is normal TS-ESM convention; this plain-JS Vite project has none, and
+   Vite's resolver treats an explicit `.js` extension as literal - it
+   won't fall back to `.ts`. The extension-less form lets Vite's default
+   `resolve.extensions` (which includes `.ts`) find the generated file
+   either way.
 2. **`libsodium-wrappers` isn't installed yet** (added to `package.json`,
    not run - no npm registry access in this sandbox). Needed for
    `globals.js`'s crypto functions (`genBoxKeyPair`, `genSecretKey`,
@@ -63,6 +86,7 @@ This scaffold will not connect to anything yet. In order:
    port from at all - v1 predates all of them. Each needs its exact wire
    messages worked out against a real connection, once Phase 2's engine
    build exists to compare against (see the plan doc's Phase 5).
-6. **Not wired into the Vue app yet.** Nothing in `src/webclient/views`
-   calls `bridge.js`'s `initBridge()` or embeds the Phase 2 engine build -
-   that's the next slice, once there's an actual engine build to point at.
+6. **Wired into the Vue app, but untested.** `src/webclient/views/Engine
+   .vue` calls `bridge.js`'s `initBridge()` on mount, before loading `main
+   .dart.js` - structurally in place, but nothing has actually run this
+   against a real engine build yet.
