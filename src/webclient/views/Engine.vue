@@ -1,0 +1,99 @@
+<template>
+  <div class="engine-page">
+    <div v-if="loading" class="loading">
+      <el-icon class="is-loading" :size="32"><Loading/></el-icon>
+      <span>Loading RustDesk...</span>
+    </div>
+    <div v-if="error" class="error">
+      <p>{{ error }}</p>
+      <el-button @click="handleLogout">Back to login</el-button>
+    </div>
+    <!--
+      The Flutter engine (Phase 2's `flutter build web` output) mounts
+      itself into the document directly - it doesn't render into a Vue
+      component tree (see docs/WEBCLIENT_V2_REBUILD_PLAN.md's Phase 3
+      findings: Dart owns painting via CanvasKit, driven by onRgba, not
+      Vue). This div exists only as a landmark/host element; nothing here
+      renders Vue-side once the engine takes over.
+    -->
+    <div id="engine-host"></div>
+  </div>
+</template>
+
+<script setup>
+  import { onMounted, ref } from 'vue'
+  import { useRouter } from 'vue-router'
+  import { Loading } from '@element-plus/icons'
+  import { initBridge } from '@/webclient/connection/bridge'
+  import { logout } from '@/webclient/api/user'
+  import { useWebclientUserStore } from '@/webclient/store/user'
+
+  const router = useRouter()
+  const userStore = useWebclientUserStore()
+
+  const loading = ref(true)
+  const error = ref('')
+
+  // Where Phase 2's `flutter build web --release` output actually gets
+  // served from isn't decided yet - that's part of Phase 6 (Cutover), or
+  // a dev-only path before then. Configurable so this doesn't need
+  // editing once that's settled.
+  const ENGINE_BASE_URL = import.meta.env.VITE_ENGINE_BASE_URL || '/engine/'
+
+  function loadScript (src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = src
+      script.onload = resolve
+      script.onerror = () => reject(new Error(`Failed to load ${src}`))
+      document.body.appendChild(script)
+    })
+  }
+
+  onMounted(async () => {
+    // window.setByName/window.getByName must exist before the engine's
+    // first frame runs, since it calls them immediately on init (see
+    // Phase 3 findings) - initBridge() before loading main.dart.js, not
+    // after.
+    initBridge()
+
+    try {
+      // Mirrors the currently-vendored bundle's own loader (see Phase 1
+      // findings: service-worker-gated, falls back to a plain <script>
+      // tag) - simplified here since there's no engine build to actually
+      // test this against yet. Revisit once Phase 2 has real output to
+      // point at.
+      await loadScript(`${ENGINE_BASE_URL}main.dart.js`)
+      loading.value = false
+    } catch (e) {
+      loading.value = false
+      error.value = 'Could not load the RustDesk engine. ' +
+        '(Phase 2\'s flutter build web output isn\'t available at ' +
+        `${ENGINE_BASE_URL} yet - see docs/WEBCLIENT_V2_REBUILD_PLAN.md.)`
+      console.error(e)
+    }
+  })
+
+  const handleLogout = async () => {
+    await logout().catch(() => {})
+    userStore.clearLocal()
+    await router.push({ name: 'WebclientLogin' })
+  }
+</script>
+
+<style scoped>
+.engine-page {
+  min-height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.loading, .error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+}
+</style>

@@ -5,14 +5,20 @@
 Replace the legacy compiled webclient (`resources/web` in `rustdesk-api`,
 currently patched by hand per `resources/web/PATCHES.md`) with a fully
 source-available implementation that achieves **feature parity with the
-legacy webclient before `/webclient` is repointed** to it: a new Vue 3
-dashboard/login/settings shell (styled to match Ant Design Pro's visual
-language, same approach as the `_admin`/login restyle already done) hosting
-the *actual* RustDesk remote-desktop engine, built from source rather than
-vendored as an opaque binary. The goal is a true replacement, not a minimum
-viable one - so the whole thing is finally something we can actually read,
-test, and fix instead of hex-patching a black box, without asking users to
-fall back to the legacy client for anything they could already do.
+legacy webclient before `/webclient` is repointed** to it: a thin Vue 3
+login gate (styled to match `_admin`'s restyled login page - same approach
+already done there) hosting the *actual* RustDesk remote-desktop engine,
+built from source rather than vendored as an opaque binary. The goal is a
+true replacement, not a minimum viable one - so the whole thing is finally
+something we can actually read, test, and fix instead of hex-patching a
+black box, without asking users to fall back to the legacy client for
+anything they could already do.
+
+(Revised mid-Phase-4: earlier phrasing here described a full Vue-rendered
+"dashboard/login/settings shell." That assumed the dashboard/settings UI
+needed rebuilding in Vue - Phase 4's findings (below) showed the recovered
+Flutter engine already renders all of that itself, using RustDesk's real
+shared UI code. See Phase 4's findings section for the full reasoning.)
 
 ## What's actually in the compiled bundle (confirmed, not guessed)
 
@@ -71,10 +77,13 @@ strictly worse than the alternative:
    had a working web build target in over a year, and the recovered
    snapshot isn't guaranteed to exactly reproduce what's in today's vendored
    bundle on the first try.
-2. Write the new Vue 3 + Element Plus dashboard/login/settings shell (the
+2. Write a new Vue 3 + Element Plus login gate + engine-hosting shell (the
    piece whose source was genuinely never published - `flutter/web/v2` was
    always just a `README.md` saying "Under dev.") to host that from-source
    Flutter build, the same way `index.js` currently hosts the compiled one.
+   (Originally scoped as a full dashboard/settings UI too - Phase 4's
+   findings showed the engine already renders all of that itself; see
+   Phase 4 below.)
 3. The exact interop contract between the shell and the Flutter engine
    (how connection config gets passed in, what events - if any - the engine
    emits back out) was **not** found via static string search of the
@@ -141,7 +150,7 @@ switch between depending on which feature they need.
 | Work | Repo | Why |
 |---|---|---|
 | Recover `flutter/web` from git history, get `flutter build web --release` working from source again (Phase 2) | `Chr0mX/rustdesk` | This is where the Flutter/Dart engine's source lives - the same repo already used for the Android/iOS/Linux/macOS/Windows clients. Reversed from the earlier decision to keep this plan out of that repo entirely, once `main.dart.js` was confirmed load-bearing. |
-| Vue 3 dashboard/login/settings shell, the shell/engine interop layer (Phase 3/4), embedding the Phase 2 build output | `rustdesk-api-web` | Per instruction: default location unless there's a specific reason not to. This is the piece whose source was genuinely never published (`flutter/web/v2` was always just "Under dev."). |
+| Vue 3 login gate + engine-hosting shell, the shell/engine interop layer (Phase 3/4), embedding the Phase 2 build output | `rustdesk-api-web` | Per instruction: default location unless there's a specific reason not to. This is the piece whose source was genuinely never published (`flutter/web/v2` was always just "Under dev."). Scoped down from a full dashboard/settings UI once Phase 4 found the engine already renders that itself. |
 | Read-only source of `.proto` files, for any wire-format sanity checks that still reference `v1` | `rustdesk-server` (`libs/hbb_common/protos/*.proto`) | Already vendored there; no changes needed to that repo. Less central to this plan than originally thought, now that the transport/protocol layer lives inside the recovered Flutter engine rather than a ported TypeScript layer - kept for reference/verification only. |
 | Legacy-slug route + admin toggle (Phase 0, shipped), and later the `/webclient/*` route swap (Phase 6) | `rustdesk-api` | The Go backend owns routing. Phase 0 added a new config-gated path serving today's compiled bundle unchanged; Phase 6 later points `router.go`'s `wc.StaticFS(...)` for the canonical `/webclient/` path at the new build's output instead (now a composite of the Vite-built shell and the `flutter build web` engine output). Neither is new logic - `ConfigJs`, `WebclientAuth`, `WebclientLogin`/`WebclientLogout`, and the wc_sess session model all stay exactly as they are today. |
 
@@ -430,36 +439,76 @@ shell's `curConn`-equivalent implement the matching `setByName` cases" -
 a concrete, enumerable checklist (the case names above), not an open-ended
 reverse-engineering task.
 
-### Phase 4 - Core UI (Vue 3 + Element Plus, Ant Design Pro visual language)
+### Phase 4 - Core UI (Vue shell + engine bootstrap)
 
-Net-new work, since `v2`'s UI source was never available to port from:
+#### Phase 4 finding that changed this phase's scope
 
-- Peer-list dashboard (recent/favorite/LAN-discovered/group/address-book
-  peers, online-status polling) - reusing `rustdesk-api`'s existing
-  `/api/users`, `/api/peers`, `/api/ab`, `/api/device-group/accessible`
-  endpoints, which already exist and are already used by `_admin` in
-  similar form.
-- Settings panel (General/Network/Display/Account tabs) - Account tab wires
-  directly to the *existing* `POST /api/login` / account endpoints this
-  session's work already established as the pattern (no new backend auth
-  work needed - reuse `wc_sess`/`ConfigJs`'s existing model, just render it
-  natively instead of syncing into two different localStorage namespaces
-  the way the compiled bundle forced us to).
-- Connection entry point that embeds/launches the Phase 2 Flutter engine
-  build and implements the `curConn`-equivalent object Phase 3 found the
-  engine expects at `window.setByName`/`.getByName` (extending `connection
-  .ts`, not writing it from scratch - see Phase 3 findings for the full
-  case list) - not a hand-built canvas/input layer, since the *rendering*
-  and native input capture stay owned by the embedded Dart engine via
-  `onRgba` and the same global bridge.
-- Visual language: Ant Design Pro's look (card layout, primary color,
-  sidebar/header conventions) reusing the same restyle approach already
-  applied to `_admin`'s login page and layout shell this session - CSS/
-  component-styling work, not a new framework.
+Before writing the dashboard/settings UI this phase originally called for,
+checked `Chr0mX/rustdesk`'s actual Dart source (recovered in Phase 2) for
+what the web build's root widget renders. It's decisive, not ambiguous:
 
-This phase gets the new shell to "dashboard works, launches a connection
-through the real engine." Phase 5 verifies that connection actually carries
-every capability the legacy bundle had.
+- `flutter/lib/main.dart` picks `WebHomePage()` as the app's `home` for web
+  builds.
+- `WebHomePage` (`flutter/lib/mobile/pages/home_page.dart`) renders
+  `ConnectionPage` (`flutter/lib/mobile/pages/connection_page.dart`) - the
+  **same connection-entry screen the mobile app uses**: an ID input bar
+  with autocomplete, backed by `AllPeersLoader` (a real peer list). Its app
+  bar action opens `WebSettingsPage`
+  (`flutter/lib/web/settings_page.dart`), which navigates straight to
+  `DesktopSettingPage` - **the actual, full desktop settings screen**,
+  reused as-is.
+- `flutter/lib/web/web_unique.dart` shows Dart also drives file-transfer's
+  local-file-picker UI via `setByName('select_files', ...)`/
+  `setByName('send_local_files', ...)`.
+
+**The recovered Flutter engine, once built, already renders a complete,
+working dashboard - peer list, connect-by-ID, settings, file transfer UI -
+using RustDesk's real, shared cross-platform widgets.** None of that needs
+to be rebuilt. This directly contradicts this phase's original premise (a
+Vue-rendered peer-list dashboard and settings panel) - **the Vue
+`Dashboard.vue`/`Settings.vue` views built under that premise (an earlier
+Phase 4 slice) are redundant and have been removed**, per the decision
+below.
+
+This also means Ant Design Pro-style visual restyling, if it's meant to
+change what a user actually *sees* once logged in, is a **Flutter/Dart
+theming question in `Chr0mX/rustdesk`**, not a Vue/Element Plus question in
+`rustdesk-api-web` - CanvasKit paints those pixels, not the DOM. Out of
+scope for this repo unless a future decision explicitly extends it there.
+
+**Decision** (see session notes): keep the Vue app as a **thin pre-engine
+gate only** - the outer login page (before the engine loads) and
+bootstrapping/hosting the Flutter engine - rather than the alternative
+(suppressing Dart's own UI and reimplementing it in Vue, which would mean
+touching `Chr0mX/rustdesk`'s Dart UI code, not just consuming it as-is).
+Once the engine loads, it owns the entire visible experience.
+
+#### Scope, as revised
+
+- **Login gate**: the existing `Login.vue` (built in an earlier Phase 4
+  slice, still needed unchanged) - wires to `POST /api/login`, matching
+  what this session's earlier work already established as the pattern for
+  the legacy webclient's own login page. This is the *only* Vue-rendered
+  screen a logged-in-and-loaded user should ever actually see for more
+  than a moment.
+- **Engine bootstrap view**: replaces the removed `Dashboard.vue` as the
+  post-login route. Loads the Phase 2 `flutter build web` output (`main
+  .dart.js` + assets) into the page, calls `bridge.js`'s `initBridge()` so
+  `window.setByName`/`.getByName` are live before the engine starts asking
+  for data, and gets out of the way - no dashboard UI of its own beyond a
+  loading state.
+- **`curConn`/`bridge.js` (already scaffolded)**: still exactly as
+  necessary as before this finding - Dart's `AllPeersLoader`, connection
+  flow, and settings all still call into this JS layer for actual
+  networking/data (peer lists, login, video/audio, file transfer), the
+  same way `js/dist/index.js` does in the currently-vendored bundle. This
+  finding is about who **renders the UI**, not who **owns the
+  transport/data layer** - Phase 3's contract is unchanged and still the
+  right target.
+
+This phase gets the new shell to "log in, hand off to the real engine,
+which renders everything else." Phase 5 verifies that hand-off actually
+carries every capability the legacy bundle had.
 
 ### Phase 5 - Feature parity verification
 
@@ -517,12 +566,16 @@ exception appended to this doc.
 
 ## Future: merging the admin dashboard and webclient
 
-Noted for later, not actionable now: since this plan puts the new webclient
-in the *same* Vue 3 + Element Plus codebase as `_admin` (rather than a
-separate framework), merging them into one experience later is a real,
-reachable option - shared routing/nav, shared auth state, no
-framework-porting cost, since it's already one app. Revisit once Phase 6
-ships and the webclient has been stable for a bit; premature to design now.
+Noted for later, not actionable now, and smaller in scope than originally
+imagined: since Phase 4's findings, the webclient app is a thin login gate
+(one screen) plus an engine-hosting view, not a full parallel dashboard -
+there's much less to "merge" with `_admin` than this section originally
+pictured. What's still real: both apps share the same Vue 3 + Element Plus
+codebase and could share auth state/routing for the login step specifically
+(e.g. an already-logged-in admin skipping straight past the webclient's own
+login gate - `webclientSession`/`webclientBridge` in `src/api/config.js`
+already do something like this today). Revisit once Phase 6 ships; not
+worth designing further now.
 
 ## Risks
 
@@ -557,3 +610,10 @@ ships and the webclient has been stable for a bit; premature to design now.
   this session's sandbox for build verification generally - every phase
   needs real build/test verification in an environment that actually has
   it, not just code review.
+- **Visual styling is now largely out of `rustdesk-api-web`'s control.**
+  Phase 4's finding means the dashboard/settings/connection UI a user sees
+  is whatever `Chr0mX/rustdesk`'s Dart/Flutter theme produces, not
+  something this repo's Vue/Element Plus code can restyle. If matching Ant
+  Design Pro's look for the *whole* experience (not just the login gate)
+  turns out to matter to stakeholders, that's a real, separate Flutter
+  theming project in `Chr0mX/rustdesk` - not scoped or estimated here.
