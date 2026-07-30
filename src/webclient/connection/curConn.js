@@ -18,23 +18,59 @@ import * as sha256 from 'fast-sha256'
 import * as globals from './globals'
 import { mapKey, sleep } from './common'
 
-const PORT = 21116
-// v1 defaulted to RustDesk's own public relay fleet - appropriate for its
-// original purpose (a public demo page anyone could point at any server),
-// wrong for this self-hosted product: if custom-rendezvous-server was
-// somehow never injected (see bridge.js/Engine.vue), silently phoning
-// home to a third party's infrastructure on every page load is a real
-// privacy/security problem, not just a broken feature. No fallback host -
-// getDefaultUri() below requires localStorage's custom-rendezvous-server
-// (set by /webclient-config/index.js, same mechanism the legacy bundled
-// webclient uses) and throws if it's missing, rather than guessing.
-let HOST = localStorage.getItem('custom-rendezvous-server') || ''
-// Browsers refuse to open a plain ws:// socket from a page loaded over
-// https (SecurityError, blocked before the request is even sent) - v1
-// hardcoded ws:// because its own recovered source never needed to run
-// behind TLS. This deployment does (install.sh's Nginx+Certbot flow), so
-// the scheme has to follow the page's own protocol.
-const SCHEMA = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss://' : 'ws://'
+// v1's own URI construction (SCHEMA='ws://' always, plus a flat PORT+offset
+// for every host) is NOT what the currently-deployed legacy webclient
+// bundle (resources/web/js/dist/index.js) actually does - decompiled and
+// ported faithfully below instead of guessing, since that bundle is the
+// one already proven working against this exact server. Two real
+// differences from v1 that matter here:
+//   - scheme follows the page's own protocol (wss:// behind the
+//     Nginx+Certbot TLS install.sh sets up), not hardcoded ws:// - a
+//     plain ws:// socket from an https:// page throws a SecurityError
+//     synchronously, which is what was hanging the engine at "Loading
+//     RustDesk...".
+//   - a domain-name host (the common case for a real TLS deployment) is
+//     NOT reached via host:port at all - it's a fixed /ws/id or
+//     /ws/relay path with no port, since a reverse proxy terminating TLS
+//     on 443 is expected to route those paths to hbbs's real internal
+//     ports. Only bare IP hosts use the PORT+offset scheme v1 always
+//     used. Getting this wrong for a domain host is a silent failure,
+//     not an error - the socket just never reaches anything real.
+const ID_PORT = 21118
+const RELAY_PORT = 21119
+
+function hasWsScheme (u) {
+  return u.startsWith('ws://') || u.startsWith('wss://')
+}
+function isIPv4 (u) {
+  return /^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(:\d+)?$/.test(u)
+}
+function isIPv6 (u) {
+  return /^((([a-fA-F0-9]{1,4}:{1,2})+[a-fA-F0-9]{1,4})|(\[([a-fA-F0-9]{1,4}:{1,2})+[a-fA-F0-9]{1,4}\]:\d+))$/.test(u)
+}
+function isDomainWithPort (u) {
+  return /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z-]{0,61}[a-z]:\d{1,5}$/i.test(u)
+}
+function isDomain (u) {
+  return /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z-]{0,61}[a-z]$/i.test(u)
+}
+function isHttps () {
+  return typeof window !== 'undefined' && window.location.protocol === 'https:'
+}
+
+// v1 defaulted to RustDesk's own public relay fleet if unconfigured -
+// appropriate for its original purpose (a public demo page anyone could
+// point at any server), wrong for this self-hosted product. The real
+// bundle's own fallback (window.location.host, i.e. same-origin) is
+// ported here instead: still a guess, but one that at least has a
+// chance of being routed by the same reverse proxy serving this page,
+// rather than silently phoning home to a third party.
+function defaultRendezvousHost () {
+  const host = typeof window !== 'undefined' ? window.location.host : ''
+  if (host.indexOf('localhost:') === 0) return '127.0.0.1'
+  const parts = host.split(':')
+  return parts.length > 1 ? parts[0] + ':' + (parseInt(parts[1]) + 2) : host
+}
 
 export default class CurConn {
   constructor () {
@@ -132,7 +168,7 @@ export default class CurConn {
     const pk = rr.pk
     let uri = rr.relay_server
     if (uri) {
-      uri = getrUriFromRs(uri, true, 2)
+      uri = getrUriFromRs(uri, true)
     } else {
       uri = getDefaultUri(true)
     }
@@ -766,18 +802,48 @@ export { testDelay }
 
 function getDefaultUri (isRelay = false) {
   const host = localStorage.getItem('custom-rendezvous-server')
-  return getrUriFromRs(host || HOST, isRelay)
+  return getrUriFromRs(host || defaultRendezvousHost(), isRelay)
 }
 
-function getrUriFromRs (uri, isRelay = false, roffset = 0) {
-  if (uri.indexOf(':') > 0) {
-    const tmp = uri.split(':')
-    const port = parseInt(tmp[1])
-    uri = tmp[0] + ':' + (port + (isRelay ? roffset || 3 : 2))
-  } else {
-    uri += ':' + (PORT + (isRelay ? 3 : 2))
+// Faithful port of the legacy bundled webclient's own `pe(u, e)` (see the
+// comment above ID_PORT/RELAY_PORT for why this replaced v1's simpler
+// version). `roffset` from the old signature is gone - the real bundle
+// always adds +2 to an explicitly-given port regardless of isRelay
+// (matches connectRelay's own v1-era `roffset=2` override below, which
+// happened to already agree with this).
+function getrUriFromRs (uri, isRelay = false) {
+  if (hasWsScheme(uri)) return uri
+  const port = isRelay ? RELAY_PORT : ID_PORT
+  const path = isRelay ? '/ws/relay' : '/ws/id'
+  const scheme = isHttps() ? 'wss' : 'ws'
+
+  if (isIPv4(uri)) {
+    const idx = uri.indexOf(':')
+    if (idx !== -1) {
+      const host = uri.substring(0, idx)
+      const p = parseInt(uri.substring(idx + 1))
+      return isNaN(p) ? `${scheme}://${host}:${port}` : `${scheme}://${host}:${p + 2}`
+    }
+    return `${scheme}://${uri}:${port}`
   }
-  return SCHEMA + uri
+  if (isIPv6(uri)) {
+    const idx = uri.lastIndexOf(']')
+    if (idx !== -1) {
+      const host = uri.substring(0, idx + 1)
+      const p = parseInt(uri.substring(idx + 2))
+      return isNaN(p) ? `${scheme}://${host}:${port}` : `${scheme}://${host}:${p + 2}`
+    }
+    return uri.startsWith('[') ? `${scheme}://${uri}:${port}` : `${scheme}://[${uri}]:${port}`
+  }
+  if (uri.includes(':')) {
+    if (isDomainWithPort(uri)) {
+      const host = uri.split(':')[0]
+      return `${scheme}://${host}${path}`
+    }
+  } else if (isDomain(uri)) {
+    return `${scheme}://${uri}${path}`
+  }
+  return uri
 }
 
 function hash (datas) {
