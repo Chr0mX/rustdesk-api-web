@@ -12,8 +12,8 @@
 // display, 2FA, elevation, codec switching - all added to the real
 // protocol after v1 was last touched, per Phase 1 findings).
 import Websock from './websock'
-import * as message from './message.js'
-import * as rendezvous from './rendezvous.js'
+import * as message from './message'
+import * as rendezvous from './rendezvous'
 import * as sha256 from 'fast-sha256'
 import * as globals from './globals'
 import { mapKey, sleep } from './common'
