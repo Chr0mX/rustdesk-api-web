@@ -70,6 +70,27 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card shadow="hover" style="margin-top: 16px;">
+      <template #header>{{ T('WebclientLegacyTitle') }}</template>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px;">
+        <template #title>{{ T('WebclientLegacyTip') }}</template>
+      </el-alert>
+      <el-form label-width="180px" label-position="left">
+        <el-form-item :label="T('WebclientLegacyEnabled')">
+          <el-switch v-model="legacyForm.webclient_legacy_enabled"/>
+        </el-form-item>
+        <el-form-item :label="T('WebclientLegacyPath')">
+          <el-input v-model="legacyForm.webclient_legacy_path" placeholder="webclient-legacy">
+            <template #prepend>/</template>
+          </el-input>
+          <div class="effective-value-hint">{{ T('WebclientLegacyPathTip') }}</div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleLegacySubmit">{{ T('Save') }}</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
   </div>
 </template>
 
@@ -77,7 +98,7 @@
   import { computed, onMounted, reactive, ref } from 'vue'
   import { ElMessage } from 'element-plus'
   import { T } from '@/utils/i18n'
-  import { server as getServerConfig, updateWebclientConfig } from '@/api/config'
+  import { server as getServerConfig, app as getAppConfig, updateWebclientConfig, updateWebclientLegacyConfig } from '@/api/config'
 
   const isLoading = ref(true)
 
@@ -91,6 +112,10 @@
     webclient_relay_server: '',
     webclient_api_server: '',
     webclient_relay_from_api_server: false,
+  })
+  const legacyForm = reactive({
+    webclient_legacy_enabled: true,
+    webclient_legacy_path: '',
   })
 
   // Best-effort client-side preview of what EffectiveWebclientRelayServer
@@ -132,13 +157,31 @@
     }
     isLoading.value = false
   }
-  onMounted(fetchConfig)
+  const fetchLegacyConfig = async () => {
+    const res = await getAppConfig().catch(_ => false)
+    if (res) {
+      legacyForm.webclient_legacy_enabled = res.data.webclient_legacy_enabled
+      legacyForm.webclient_legacy_path = res.data.webclient_legacy_path
+    }
+  }
+  onMounted(() => {
+    fetchConfig()
+    fetchLegacyConfig()
+  })
 
   const handleSubmit = async () => {
     const res = await updateWebclientConfig({ ...form }).catch(_ => false)
     if (res) {
       ElMessage.success(T('SaveSuccess'))
       await fetchConfig()
+    }
+  }
+
+  const handleLegacySubmit = async () => {
+    const res = await updateWebclientLegacyConfig({ ...legacyForm }).catch(_ => false)
+    if (res) {
+      ElMessage.success(T('SaveSuccess'))
+      await fetchLegacyConfig()
     }
   }
 </script>

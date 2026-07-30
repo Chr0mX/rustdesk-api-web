@@ -32,6 +32,18 @@ export function updateWebclientConfig (data) {
   })
 }
 
+// updateWebclientLegacyConfig toggles the legacy (compiled-bundle) webclient
+// on/off at its own URL slug, and lets the admin change that slug. Enabled
+// takes effect immediately; changing the path itself needs a server
+// restart (it's a route registration, not a live-read setting).
+export function updateWebclientLegacyConfig (data) {
+  return request({
+    url: '/config/webclient-legacy',
+    method: 'post',
+    data,
+  })
+}
+
 // webclientSession proactively establishes the webclient's auth session
 // (see rustdesk-api's middleware.WebclientAuth) for the current logged-in
 // user, so opening the webclient afterwards doesn't need a ?token= in the
