@@ -305,32 +305,49 @@ transport/codec layer" approach - genuine reconstruction work, not a
 one-command rebuild, since no working web build target has existed in
 upstream or the fork for over a year.
 
-- Recover `flutter/web` from git history at `5faf0ad3^` (the commit right
-  before upstream deleted it) into a branch of `Chr0mX/rustdesk`. Confirmed
-  contents at that commit: `v1`/`v2` only (see Phase 1 findings) - this is
-  the JS-shell lineage, not Flutter's own web scaffold, so restoring it is
-  necessary but likely not sufficient on its own for `flutter build web` to
-  succeed; expect to need to reconstruct or regenerate whatever else
-  Flutter's web target needs (a standard `flutter create --platforms web`
-  scaffold if one never existed in-tree, or was tracked elsewhere).
-- Get `flutter build web --release` running successfully against
+- [x] **Recover `flutter/web` from git history** - done, merged
+  (`Chr0mX/rustdesk#1`). Restored from `flutter/web/v1`'s content at
+  `5faf0ad3^` (the commit right before deletion), **flattened up to
+  `flutter/web/` directly** rather than left nested under `v1/` - `v1`'s
+  root-level files (`index.html`, `manifest.json`, `yarn.lock`, `yuv.js`/
+  `.wasm`, `libs/firebase-*.js`) turned out to be byte-identical to the
+  original pre-split `flutter/web/`, confirming `v1` is the real
+  continuation of the whole scaffold, not just the JS shell alone as
+  assumed when this phase was written. `icons/`/`favicon.svg` (dropped in
+  the same 2024-06-22 split that created `v1`/`v2`) restored separately
+  from the commit right before that split. `v2` was not restored - nothing
+  in it, ever, to recover. Full provenance in `flutter/web/
+  RECOVERY_NOTES.md` in that repo.
+  - **Important caveat surfaced by the recovery itself, not added
+    after the fact**: the restored `README.md` already said, as of the
+    last commit before deletion, "v1 is not compatible with current
+    Flutter source code." Real reconciliation against the current
+    `flutter/lib` should be expected - not assumed away by the fact that
+    the files now exist again.
+- [ ] Get `flutter build web --release` running successfully against
   `Chr0mX/rustdesk`'s `flutter/` app (matching upstream's now-broken CI
   step in `.github/workflows/flutter-build.yml`'s `web-basic` job, which
   can be used as a reference for the expected build steps even though it
-  currently fails). Requires a real Flutter toolchain - not available in
-  this session's sandbox, needs a proper dev/CI environment.
-- Confirm the resulting `main.dart.js` can at minimum reach `hbbs` and
+  currently fails). Requires a real Flutter toolchain - **not attempted
+  yet**; not available in this session's sandbox (no Flutter/Dart
+  toolchain, no npm/pub.dev access), needs a proper dev/CI environment.
+  Also needs `flutter/web/js`'s codegen step (`ts_proto.py`/
+  `gen_js_from_hbb.py`) run first - `message.ts`/`rendezvous.ts`/
+  `gen_js_from_hbb.ts` are gitignored and not present in the recovered
+  tree, matching how `v1` always worked (generated, not committed).
+- [ ] Confirm the resulting `main.dart.js` can at minimum reach `hbbs` and
   complete a login handshake against `rustdesk-server` - the equivalent of
   the "test in isolation, headless" step the old Phase 2 called for, just
   against a real Dart build instead of a ported TypeScript one.
-- Don't assume this recovered snapshot exactly reproduces today's vendored
-  `main.dart.js` - version/behavior differences are possible and should be
-  diffed against the current deployment (asset hashes, `version.json`,
-  visible feature set) rather than assumed identical.
+- [ ] Don't assume this recovered snapshot exactly reproduces today's
+  vendored `main.dart.js` - version/behavior differences are possible and
+  should be diffed against the current deployment (asset hashes,
+  `version.json`, visible feature set) rather than assumed identical.
 
 Exit criteria: a from-source `flutter build web --release` succeeds and
 produces a `main.dart.js` that completes a real connection to a test peer
-through `rustdesk-server`.
+through `rustdesk-server`. **Not yet met** - recovery is done, build
+verification is not.
 
 ### Phase 3 - Shell/engine interop contract
 
@@ -340,27 +357,78 @@ shared-global coordination code turned up between `index.js` and
 `main.dart.js`) and the new Vue shell needs to know how to host the Phase 2
 build correctly:
 
-- Determine how the JS shell hands connection config (peer ID, credentials,
-  server overrides, `ws_host`) to the Flutter engine - likely Dart/JS
-  interop (`dart:js_interop` or similar) reading `window`-scoped globals or
-  `localStorage`, given `ws_host` is confirmed live but never appears as a
-  literal string in the minified bundle (consistent with interop-based
-  access surviving dart2js renaming while the shell-side JS wouldn't need
-  to reference it at all).
-- Determine whether the engine emits anything back out (connection-state
-  changes, file-transfer progress, errors) that the shell would need to
-  react to, or whether it's fully self-contained once started (no visible
-  chrome from the shell during an active connection would suggest the
-  latter - worth confirming either way).
-- A build of `Chr0mX/rustdesk`'s Flutter app in **debug/profile mode**
-  (unminified, with source maps) rather than `--release` would make this
-  much faster to inspect than reverse-engineering the production
-  `main.dart.js` - do this investigation against that, not the minified
-  bundle.
+- [x] Determine how the JS shell hands connection config/commands to the
+  Flutter engine, and how the engine emits events back - **done**, see
+  findings below. Turned out fully discoverable from source (Phase 2's
+  recovery) without needing a debug Flutter build at all.
 
 Exit criteria: a short written note (append to this doc) on the actual
 embedding contract - what the Vue shell needs to set up (DOM structure,
-globals, config injection) before/while hosting the engine.
+globals, config injection) before/while hosting the engine. **Met** - see
+findings below.
+
+#### Phase 3 findings
+
+Found directly in `flutter/lib/web/bridge.dart` and `flutter/lib/models/
+web_model.dart` (`Chr0mX/rustdesk`, now recoverable thanks to Phase 2) -
+`dart:js`'s legacy `js.context` API, cross-checked against literal string
+matches in the currently-deployed `js/dist/index.js`. This is a complete,
+symmetrical, and much simpler contract than expected - two directions, each
+a small, fixed set of global functions on `window`:
+
+**Dart → JS** (synchronous RPC, one call site pattern used ~80 times across
+`bridge.dart`): `js.context.callMethod('setByName', [name, args])` and
+`.callMethod('getByName', [name, args])`. Confirmed live: `window
+.setByName=(u,e)=>{switch(u){...}}` and `window.getByName=(u,e)=>{...}` are
+defined verbatim in the current `js/dist/index.js`, with `name` values that
+map directly onto `curConn.*` method calls - `handle_login_from_ui`,
+`inputKey`/`inputString`, `switchDisplay`, `setImageQuality`/
+`setCustomImageQuality`, `ctrlAltDel`, `toggleVirtualDisplay`,
+`togglePrivacyMode`, `send2fa`, `elevateDirect`/`elevateWithLogon`,
+`changePreferCodec`, `sendNote`, `setAuditGuid`, and - important for
+Phase 5 - **file transfer is already dispatched through this exact same
+mechanism**: `readRemoteDir`, `sendFiles`, `sendLocalFiles`, `cancelJob`,
+`remove_all_empty_dirs` are all `setByName` cases calling straight into
+`curConn`.
+
+**JS → Dart** (Dart registers a small, fixed set of global callbacks via
+`js.context["name"] = (args) => {...}` early in `web_model.dart`'s
+init): `onRegisteredEvent` (generic event bus, JSON-decoded then
+dispatched via `tryHandle`), `onGlobalEvent` (same shape, routed through
+`setEventCallback`'s caller-supplied handler), `onInitFinished`,
+`onFullscreenChanged`, `onLoadAbFinished`, `onLoadGroupFinished` - and the
+one that matters most for the rendering split: **`onRgba`**
+(`(int display, Uint8List rgba)`), which JS calls with **already-decoded,
+raw RGBA pixel buffers, one call per display**.
+
+This resolves the biggest remaining architectural question cleanly:
+**JS does networking, protocol, and video/audio decode (`ffmpeg-core.wasm`/
+`libopus.wasm`) - Dart does painting (via CanvasKit, fed raw RGBA through
+`onRgba`) and native-feeling input capture, then calls back into JS via
+`setByName` to actually act on that input.** There's no `onAudio`-style
+callback into Dart at all, confirming audio playback happens entirely in
+JS (Web Audio API) without a Dart round-trip. This means `curConn` - the
+object nearly every `setByName`/`getByName` case ultimately calls into -
+**is JS, not Dart**, and is a direct descendant of `flutter/web/js/src/
+connection.ts` (the same file this plan already has real source for via
+`v1`/the Phase 2 recovery), just evolved to cover everything `v1` didn't
+(file transfer, virtual display, elevation, 2FA).
+
+Practical implication for Phase 4/5: the new Vue shell doesn't need to
+treat the recovered Flutter build as a sealed black box requiring a whole
+new interop layer to be invented. It needs to (a) implement/extend a
+`curConn`-equivalent object - starting from `connection.ts`, which is
+already most of the way there structurally - covering the full
+`setByName`/`getByName` case list above, and (b) expose the same `window
+.setByName`/`.getByName`/`onRegisteredEvent`/`onGlobalEvent`/`onRgba`/
+`onInitFinished`/`onFullscreenChanged` global functions the recovered
+`main.dart.js` already expects, so that exact build can be reused
+**unchanged** as the rendering/input layer rather than needing its own
+UI reimplementation. This also reframes Phase 5: features like file
+transfer aren't just "does the engine have them" (yes) but "does the new
+shell's `curConn`-equivalent implement the matching `setByName` cases" -
+a concrete, enumerable checklist (the case names above), not an open-ended
+reverse-engineering task.
 
 ### Phase 4 - Core UI (Vue 3 + Element Plus, Ant Design Pro visual language)
 
@@ -378,9 +446,12 @@ Net-new work, since `v2`'s UI source was never available to port from:
   natively instead of syncing into two different localStorage namespaces
   the way the compiled bundle forced us to).
 - Connection entry point that embeds/launches the Phase 2 Flutter engine
-  build per Phase 3's interop contract - not a hand-built canvas/input
-  layer, since the engine already owns rendering, input capture, and
-  quality settings.
+  build and implements the `curConn`-equivalent object Phase 3 found the
+  engine expects at `window.setByName`/`.getByName` (extending `connection
+  .ts`, not writing it from scratch - see Phase 3 findings for the full
+  case list) - not a hand-built canvas/input layer, since the *rendering*
+  and native input capture stay owned by the embedded Dart engine via
+  `onRgba` and the same global bridge.
 - Visual language: Ant Design Pro's look (card layout, primary color,
   sidebar/header conventions) reusing the same restyle approach already
   applied to `_admin`'s login page and layout shell this session - CSS/
@@ -467,12 +538,15 @@ ships and the webclient has been stable for a bit; premature to design now.
   vendored as an opaque binary (still confirmed working today) and scoping
   the rebuild down to just the shell, same as the alternative considered
   and set aside when this pivot was decided.
-- **The shell/engine interop contract (Phase 3) is currently undocumented.**
-  No `postMessage` or shared-global coordination code was found via static
-  search of the compiled bundle. If the actual mechanism turns out to be
-  something narrow/fragile (e.g. relies on exact DOM structure or timing
-  the current `index.html` happens to provide), the new Vue shell may need
-  to replicate more of that structure than expected.
+- ~~The shell/engine interop contract (Phase 3) is currently
+  undocumented.~~ **Resolved** - found directly in `Chr0mX/rustdesk`'s
+  Dart source once Phase 2 made it readable again (`js.context.callMethod
+  ('setByName'/'getByName', ...)` plus a handful of registered `window`
+  callbacks, `onRgba` chief among them). See Phase 3 findings. The
+  remaining risk here is narrower: whether the Vue shell's own
+  `curConn`-equivalent object faithfully implements every `setByName`/
+  `getByName` case the recovered engine calls, not whether the mechanism
+  itself is discoverable.
 - Building `Chr0mX/rustdesk`'s Flutter app for web requires a real Flutter
   toolchain, which was not available in this session's sandbox - this
   entire investigation (Phase 1's live-deployment confirmations aside) was
