@@ -162,6 +162,32 @@ export function initBridge () {
       case 'remember':
         result = curConn?.getRemember()
         break
+      // bridge.dart's translate() (flutter/lib/web/bridge.dart) calls this
+      // for every piece of UI text, expecting the translated string back -
+      // v1's own implementation (flutter/web/js/src/common.ts's translate())
+      // looks up a generated per-locale dictionary and falls back to the
+      // original (English) text when there's no entry. That dictionary was
+      // never ported here (see README.md), so every call fell through to
+      // getByName's default case, returning '' - not "untranslated", but
+      // blank, which is why every label/button/tooltip in the engine
+      // rendered empty even though the engine itself was running fine.
+      // Always returning the source text matches v1's own fallback path
+      // exactly (its dict lookup for "en" mostly returns the source text
+      // unchanged anyway, since that dictionary's keys ARE the English
+      // strings) - it just means no actual localization until a real i18n
+      // dictionary is added.
+      case 'translate': {
+        const e = JSON.parse(arg)
+        result = e.text
+        break
+      }
+      // bridge.dart's mainGetAppNameSync (flutter/lib/web/bridge.dart) -
+      // not part of v1's getByName contract at all (added later), but the
+      // recovered engine calls it unconditionally during startup nav
+      // rendering. Static, matches this project's actual app.
+      case 'app-name':
+        result = 'RustDesk'
+        break
       case 'option:local':
       case 'option:flutter:local':
       case 'option:user:default':
