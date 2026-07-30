@@ -23,9 +23,18 @@ const conf = {
     open: true,
     port: process.env.VITE_DEV_PORT,
     proxy: {
+      // More specific /api/admin entry first - Vite checks proxy keys in
+      // insertion order, and /api/admin is a prefix match of /api below,
+      // so the order here matters.
       [process.env.VITE_SERVER_API]: {
         target: process.env.VITE_SERVER_PATH,
         // rewrite: path => path.replace(/^\/api/, '/api'), //为了模拟
+        changeOrigin: true,
+      },
+      // The webclient app (src/webclient) talks to the plain /api surface
+      // instead of /api/admin - see src/webclient/utils/request.js.
+      [process.env.VITE_WEBCLIENT_SERVER_API]: {
+        target: process.env.VITE_SERVER_PATH,
         changeOrigin: true,
       },
     },
@@ -38,6 +47,17 @@ const conf = {
     emptyOutDir: true,
     outDir: 'dist', // 产出目录
     rollupOptions: {
+      // Multi-page build: index.html is _admin (unchanged), webclient.html
+      // is the new Vue webclient shell (src/webclient) - see
+      // docs/WEBCLIENT_V2_REBUILD_PLAN.md's Phase 4. Both build into the
+      // same dist/ output; rustdesk-api's router only needs to serve
+      // webclient.html (renamed to index.html) at whatever path the
+      // webclient ends up mounted at - not done as part of this change,
+      // see the plan doc's Phase 6 for the actual cutover.
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        webclient: path.resolve(__dirname, 'webclient.html'),
+      },
       output: {
         manualChunks (id) {
           if (id.includes('node_modules')) {
