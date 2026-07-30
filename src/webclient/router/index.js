@@ -8,15 +8,13 @@ const routes = [
     component: () => import('@/webclient/views/Login.vue'),
   },
   {
+    // The Flutter engine (Phase 2) renders the actual dashboard/settings/
+    // connection UI itself once loaded - see
+    // docs/WEBCLIENT_V2_REBUILD_PLAN.md's Phase 4 findings. This route just
+    // bootstraps it; there's no separate Vue-rendered dashboard route.
     path: '/',
-    name: 'WebclientDashboard',
-    component: () => import('@/webclient/views/Dashboard.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/settings',
-    name: 'WebclientSettings',
-    component: () => import('@/webclient/views/Settings.vue'),
+    name: 'WebclientEngine',
+    component: () => import('@/webclient/views/Engine.vue'),
     meta: { requiresAuth: true },
   },
 ]

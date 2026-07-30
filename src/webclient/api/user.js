@@ -24,10 +24,3 @@ export function logout () {
     silentError: true,
   })
 }
-
-export function currentUser () {
-  return request({
-    url: '/user/info',
-    method: 'get',
-  })
-}

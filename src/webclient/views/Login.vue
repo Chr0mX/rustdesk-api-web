@@ -52,7 +52,7 @@
       return
     }
     userStore.setUser(res)
-    await router.push({ name: 'WebclientDashboard' })
+    await router.push({ name: 'WebclientEngine' })
   }
 </script>
 
