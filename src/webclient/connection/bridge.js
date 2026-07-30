@@ -19,6 +19,25 @@ export function initBridge () {
   curConn = new CurConn()
   testDelay()
 
+  // Not part of the setByName/getByName contract - models/web_model.dart's
+  // PlatformFFI.init() calls this bare global directly
+  // (context.callMethod('init')) as one of its first startup actions,
+  // before ever reaching the code that renders anything. It also registers
+  // context["onInitFinished"] (a Completer.complete callback) synchronously
+  // just before that call, and its own init() Future doesn't resolve until
+  // that callback fires - so PlatformFFI.init() would hang forever
+  // awaiting it if nothing ever called window.onInitFinished(). v1's own
+  // window.init kicked off yuv/opus decode workers, VP9 and zstd here -
+  // none of that's wired up yet (see globals.js's initAudio/playAudio and
+  // curConn.js's loadVideoDecoder stubs), so this is a no-op until Phase
+  // 4/5 gets to audio/video codecs - but it still has to exist and still
+  // has to signal completion, or Dart's own init sequence never finishes.
+  window.init = async () => {
+    if (typeof window.onInitFinished === 'function') {
+      window.onInitFinished()
+    }
+  }
+
   window.setByName = (name, arg) => {
     switch (name) {
       case 'connect':
