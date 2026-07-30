@@ -13,6 +13,12 @@ const routes = [
     component: () => import('@/webclient/views/Dashboard.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/settings',
+    name: 'WebclientSettings',
+    component: () => import('@/webclient/views/Settings.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 export const router = createRouter({

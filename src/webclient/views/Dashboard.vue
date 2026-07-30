@@ -4,6 +4,7 @@
       <span class="brand">RustDesk</span>
       <div class="spacer"/>
       <span class="username">{{ userStore.name }}</span>
+      <el-button text @click="router.push({ name: 'WebclientSettings' })">Settings</el-button>
       <el-button text @click="handleLogout">Logout</el-button>
     </header>
 
