@@ -19,13 +19,22 @@ import * as globals from './globals'
 import { mapKey, sleep } from './common'
 
 const PORT = 21116
-const HOSTS = [
-  'rs-sg.rustdesk.com',
-  'rs-cn.rustdesk.com',
-  'rs-us.rustdesk.com',
-]
-let HOST = localStorage.getItem('rendezvous-server') || HOSTS[0]
-const SCHEMA = 'ws://'
+// v1 defaulted to RustDesk's own public relay fleet - appropriate for its
+// original purpose (a public demo page anyone could point at any server),
+// wrong for this self-hosted product: if custom-rendezvous-server was
+// somehow never injected (see bridge.js/Engine.vue), silently phoning
+// home to a third party's infrastructure on every page load is a real
+// privacy/security problem, not just a broken feature. No fallback host -
+// getDefaultUri() below requires localStorage's custom-rendezvous-server
+// (set by /webclient-config/index.js, same mechanism the legacy bundled
+// webclient uses) and throws if it's missing, rather than guessing.
+let HOST = localStorage.getItem('custom-rendezvous-server') || ''
+// Browsers refuse to open a plain ws:// socket from a page loaded over
+// https (SecurityError, blocked before the request is even sent) - v1
+// hardcoded ws:// because its own recovered source never needed to run
+// behind TLS. This deployment does (install.sh's Nginx+Certbot flow), so
+// the scheme has to follow the page's own protocol.
+const SCHEMA = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss://' : 'ws://'
 
 export default class CurConn {
   constructor () {
@@ -727,17 +736,26 @@ export default class CurConn {
 }
 
 function testDelay () {
-  let nearest = ''
-  HOSTS.forEach((host) => {
-    const now = new Date().getTime()
+  // v1 raced all of HOSTS (its public relay fleet) to pick the nearest one
+  // - meaningless here, there's exactly one server to talk to (whatever
+  // the admin configured). Just log its latency; never crash startup over
+  // it - a slow/unreachable relay test shouldn't block the login gate or
+  // the engine bootstrap that's waiting on initBridge().
+  const host = localStorage.getItem('custom-rendezvous-server')
+  if (!host) {
+    console.warn('testDelay: no custom-rendezvous-server configured, skipping')
+    return
+  }
+  const now = new Date().getTime()
+  try {
     new Websock(getrUriFromRs(host), true).open().then(() => {
       console.log('latency of ' + host + ': ' + (new Date().getTime() - now))
-      if (!nearest) {
-        HOST = host
-        localStorage.setItem('rendezvous-server', host)
-      }
+    }).catch((e) => {
+      console.warn('testDelay: could not reach ' + host, e)
     })
-  })
+  } catch (e) {
+    console.warn('testDelay: could not reach ' + host, e)
+  }
 }
 
 // v1 ran this unconditionally at module load - kept as an exported function

@@ -51,6 +51,23 @@
   }
 
   onMounted(async () => {
+    try {
+      // rustdesk-api's /webclient-config/index.js is what actually knows
+      // the real id-server/relay-server/key (admin-configured) - it's
+      // gated by WebclientAuth (see rustdesk-api's http/middleware/
+      // webclient.go), which our webclient login never satisfies on its
+      // own (it's a plain /api/login, a completely separate auth path
+      // from WebclientAuth's wc_sess cookie / ?token= check). Passing our
+      // own access token as ?token= here authenticates this one request
+      // the same way opening /webclient/?token=... does, and also mints
+      // the wc_sess cookie for next time. Without this, curConn.js has no
+      // custom-rendezvous-server in localStorage at all and testDelay()/
+      // getDefaultUri() have nothing to connect to.
+      await loadScript(`/webclient-config/index.js?token=${encodeURIComponent(userStore.token)}`)
+    } catch (e) {
+      console.error('Failed to load webclient config', e)
+    }
+
     // window.setByName/window.getByName must exist before the engine's
     // first frame runs, since it calls them immediately on init (see
     // Phase 3 findings) - initBridge() before loading main.dart.js, not
