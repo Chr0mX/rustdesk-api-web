@@ -634,6 +634,21 @@
   "WebclientServerRelayFromApiTip": {
     "One": "Useful when hbbs/hbbr only have a LAN address but the API server is the WAN-reachable one - keeps the relay server's port, swaps in the API server's host. Only applies when the field above is blank."
   },
+  "WebclientLegacyTitle": {
+    "One": "Legacy Webclient (standalone URL)"
+  },
+  "WebclientLegacyTip": {
+    "One": "The current, closed-source webclient is also reachable at its own URL, independent of the main /webclient path, so it keeps working even after that gets replaced. Turn it off entirely if you don't want it reachable at all."
+  },
+  "WebclientLegacyEnabled": {
+    "One": "Enable legacy webclient at its own URL"
+  },
+  "WebclientLegacyPath": {
+    "One": "URL path"
+  },
+  "WebclientLegacyPathTip": {
+    "One": "Changing the path requires a server restart to take effect. Enabling/disabling does not."
+  },
   "SaveSuccess": {
     "One": "Saved successfully."
   }
