@@ -305,32 +305,49 @@ transport/codec layer" approach - genuine reconstruction work, not a
 one-command rebuild, since no working web build target has existed in
 upstream or the fork for over a year.
 
-- Recover `flutter/web` from git history at `5faf0ad3^` (the commit right
-  before upstream deleted it) into a branch of `Chr0mX/rustdesk`. Confirmed
-  contents at that commit: `v1`/`v2` only (see Phase 1 findings) - this is
-  the JS-shell lineage, not Flutter's own web scaffold, so restoring it is
-  necessary but likely not sufficient on its own for `flutter build web` to
-  succeed; expect to need to reconstruct or regenerate whatever else
-  Flutter's web target needs (a standard `flutter create --platforms web`
-  scaffold if one never existed in-tree, or was tracked elsewhere).
-- Get `flutter build web --release` running successfully against
+- [x] **Recover `flutter/web` from git history** - done, merged
+  (`Chr0mX/rustdesk#1`). Restored from `flutter/web/v1`'s content at
+  `5faf0ad3^` (the commit right before deletion), **flattened up to
+  `flutter/web/` directly** rather than left nested under `v1/` - `v1`'s
+  root-level files (`index.html`, `manifest.json`, `yarn.lock`, `yuv.js`/
+  `.wasm`, `libs/firebase-*.js`) turned out to be byte-identical to the
+  original pre-split `flutter/web/`, confirming `v1` is the real
+  continuation of the whole scaffold, not just the JS shell alone as
+  assumed when this phase was written. `icons/`/`favicon.svg` (dropped in
+  the same 2024-06-22 split that created `v1`/`v2`) restored separately
+  from the commit right before that split. `v2` was not restored - nothing
+  in it, ever, to recover. Full provenance in `flutter/web/
+  RECOVERY_NOTES.md` in that repo.
+  - **Important caveat surfaced by the recovery itself, not added
+    after the fact**: the restored `README.md` already said, as of the
+    last commit before deletion, "v1 is not compatible with current
+    Flutter source code." Real reconciliation against the current
+    `flutter/lib` should be expected - not assumed away by the fact that
+    the files now exist again.
+- [ ] Get `flutter build web --release` running successfully against
   `Chr0mX/rustdesk`'s `flutter/` app (matching upstream's now-broken CI
   step in `.github/workflows/flutter-build.yml`'s `web-basic` job, which
   can be used as a reference for the expected build steps even though it
-  currently fails). Requires a real Flutter toolchain - not available in
-  this session's sandbox, needs a proper dev/CI environment.
-- Confirm the resulting `main.dart.js` can at minimum reach `hbbs` and
+  currently fails). Requires a real Flutter toolchain - **not attempted
+  yet**; not available in this session's sandbox (no Flutter/Dart
+  toolchain, no npm/pub.dev access), needs a proper dev/CI environment.
+  Also needs `flutter/web/js`'s codegen step (`ts_proto.py`/
+  `gen_js_from_hbb.py`) run first - `message.ts`/`rendezvous.ts`/
+  `gen_js_from_hbb.ts` are gitignored and not present in the recovered
+  tree, matching how `v1` always worked (generated, not committed).
+- [ ] Confirm the resulting `main.dart.js` can at minimum reach `hbbs` and
   complete a login handshake against `rustdesk-server` - the equivalent of
   the "test in isolation, headless" step the old Phase 2 called for, just
   against a real Dart build instead of a ported TypeScript one.
-- Don't assume this recovered snapshot exactly reproduces today's vendored
-  `main.dart.js` - version/behavior differences are possible and should be
-  diffed against the current deployment (asset hashes, `version.json`,
-  visible feature set) rather than assumed identical.
+- [ ] Don't assume this recovered snapshot exactly reproduces today's
+  vendored `main.dart.js` - version/behavior differences are possible and
+  should be diffed against the current deployment (asset hashes,
+  `version.json`, visible feature set) rather than assumed identical.
 
 Exit criteria: a from-source `flutter build web --release` succeeds and
 produces a `main.dart.js` that completes a real connection to a test peer
-through `rustdesk-server`.
+through `rustdesk-server`. **Not yet met** - recovery is done, build
+verification is not.
 
 ### Phase 3 - Shell/engine interop contract
 
