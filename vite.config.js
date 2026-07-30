@@ -14,6 +14,16 @@ for (const k in envConfig) {
 let alias = {
   '@': path.resolve(__dirname, './src'),
   'vue$': 'vue/dist/vue.runtime.esm-bundler.js',
+  // libsodium-wrappers' ESM build (dist/modules-esm/libsodium-wrappers.mjs)
+  // has a real upstream packaging bug: it does `import e from "./libsodium.mjs"`,
+  // a relative import that only resolves within its own package directory,
+  // but that file is only ever published by the separate "libsodium"
+  // package - so Vite/Rollup (correctly) can't find it and the build fails
+  // with "Could not resolve './libsodium.mjs'". The CJS build
+  // (dist/modules/libsodium-wrappers.js) doesn't have this bug - it
+  // `require("libsodium")`s the whole package by name instead of a broken
+  // relative path - so force resolution there instead.
+  'libsodium-wrappers': 'libsodium-wrappers/dist/modules/libsodium-wrappers.js',
 }
 
 const conf = {
