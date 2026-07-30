@@ -15,7 +15,15 @@ export const useWebclientUserStore = defineStore('webclientUser', {
     isAdmin: false,
   }),
   actions: {
-    setUser ({ accessToken, user }) {
+    // rustdesk-api's LoginRes serializes as snake_case (`json:"access_token"`
+    // - see http/response/api/user.go), not accessToken - this was silently
+    // storing undefined (then the literal string "undefined" via
+    // localStorage.setItem, which is truthy) on every login, letting the
+    // router's `!userStore.token` guard wave the user through to
+    // Engine.vue with a garbage token that then broke everything
+    // downstream (the webclient-config ?token= request, curConn's Bearer
+    // auth header), rather than actually failing at login.
+    setUser ({ access_token: accessToken, user }) {
       this.token = accessToken
       localStorage.setItem(TOKEN_KEY, accessToken)
       this.name = user?.name || ''
