@@ -188,6 +188,21 @@ export function initBridge () {
       case 'app-name':
         result = 'RustDesk'
         break
+      // bridge.dart's mainGetApiServer (flutter/lib/web/bridge.dart) - the
+      // address book (ab_model.dart) and every other /api/* call build
+      // their request URL by string-concatenating this value directly
+      // (`"${await bind.mainGetApiServer()}/api/ab/shared/profiles..."`),
+      // so an unhandled '' here doesn't fail loudly - it just produces a
+      // malformed relative/scheme-less URI ("Failed to fetch,
+      // uri=///api/ab/shared/profiles..."). rustdesk-api's ConfigJs
+      // (http/controller/web/index.go) already seeds this exact value into
+      // localStorage under the plain (unprefixed) key 'api-server' on every
+      // /webclient-config/index.js load - curConn.js's own
+      // 'custom-rendezvous-server' lookup already relies on that same
+      // script, this just reads the sibling key.
+      case 'api_server':
+        result = localStorage.getItem('api-server') || ''
+        break
       case 'option:local':
       case 'option:flutter:local':
       case 'option:user:default':
