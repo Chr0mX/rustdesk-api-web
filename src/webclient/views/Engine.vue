@@ -50,6 +50,31 @@
     })
   }
 
+  // main.dart.js resolves its own assets (FontManifest.json, canvaskit,
+  // packages/.../no_sleep.js, ...) against document.baseURI at runtime,
+  // not anything baked in at flutter-build time - confirmed in the
+  // compiled engine itself (both this repo's and the legacy bundled
+  // one's main.dart.js reference document.baseURI/assetBase directly).
+  // `flutter build web --base-href` only rewrites Flutter's OWN
+  // generated index.html, which we never load - we load main.dart.js
+  // straight into THIS page (webclient.html), which has no <base> tag
+  // of its own, so it defaulted to this page's own directory
+  // (/webclient-dev/) instead of where the engine files actually live
+  // (/webclient-dev/engine/), 404ing on every asset. Setting <base>
+  // ourselves, right before loading the engine, is the actual fix -
+  // removed again on logout so it doesn't affect Login.vue's own
+  // relative resource resolution afterward.
+  let baseEl = null
+  function setDocumentBase (href) {
+    baseEl = document.querySelector('base') || document.createElement('base')
+    baseEl.setAttribute('href', href)
+    if (!baseEl.parentNode) document.head.prepend(baseEl)
+  }
+  function clearDocumentBase () {
+    if (baseEl && baseEl.parentNode) baseEl.parentNode.removeChild(baseEl)
+    baseEl = null
+  }
+
   onMounted(async () => {
     try {
       // rustdesk-api's /webclient-config/index.js is what actually knows
@@ -75,6 +100,7 @@
     initBridge()
 
     try {
+      setDocumentBase(ENGINE_BASE_URL)
       // Mirrors the currently-vendored bundle's own loader (see Phase 1
       // findings: service-worker-gated, falls back to a plain <script>
       // tag) - simplified here since there's no engine build to actually
@@ -84,6 +110,7 @@
       loading.value = false
     } catch (e) {
       loading.value = false
+      clearDocumentBase()
       error.value = 'Could not load the RustDesk engine. ' +
         '(Phase 2\'s flutter build web output isn\'t available at ' +
         `${ENGINE_BASE_URL} yet - see docs/WEBCLIENT_V2_REBUILD_PLAN.md.)`
@@ -92,6 +119,7 @@
   })
 
   const handleLogout = async () => {
+    clearDocumentBase()
     await logout().catch(() => {})
     userStore.clearLocal()
     await router.push({ name: 'WebclientLogin' })
