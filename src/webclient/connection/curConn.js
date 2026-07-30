@@ -77,6 +77,16 @@ export default class CurConn {
     this._msgs = []
     this._id = ''
     this._videoTestSpeed = [0, 0]
+    // getOption/setOption/getRemember/getToggleOption etc. all assume
+    // this is already an object - _start() is the only other place that
+    // sets it (from globals.getPeers()[id]), but that only runs after a
+    // "connect" setByName call. Dart calls window.getByName("option:...")
+    // well before that, while constructing PeerTabModel/ServerModel/
+    // ChatModel during initGlobalFFI (its very first startup pass, before
+    // any peer is even chosen) - without this, that first call dereferences
+    // undefined and crashes the engine before it ever gets to render
+    // anything.
+    this._options = {}
   }
 
   async start (id) {
@@ -92,8 +102,13 @@ export default class CurConn {
   }
 
   async _start (id) {
-    if (!this._options) {
+    // Guards against reconnect() (which reuses this same instance) reloading
+    // stale persisted options over ones already in memory - _options is
+    // always an object now (see constructor), so this can't key off its
+    // truthiness anymore.
+    if (!this._optionsLoaded) {
       this._options = globals.getPeers()[id] || {}
+      this._optionsLoaded = true
     }
     if (!this._password) {
       const p = this.getOption('password')
