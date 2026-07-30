@@ -22,8 +22,22 @@ let alias = {
   // with "Could not resolve './libsodium.mjs'". The CJS build
   // (dist/modules/libsodium-wrappers.js) doesn't have this bug - it
   // `require("libsodium")`s the whole package by name instead of a broken
-  // relative path - so force resolution there instead.
-  'libsodium-wrappers': 'libsodium-wrappers/dist/modules/libsodium-wrappers.js',
+  // relative path. Can't just alias to the package-relative specifier
+  // "libsodium-wrappers/dist/modules/libsodium-wrappers.js" either, though
+  // (tried that first, it fails too) - the package's package.json
+  // "exports" map only declares the "." entry, no subpaths, so Node/Vite's
+  // exports resolution rejects any deep import as an unlisted specifier
+  // ("Missing ... specifier in libsodium-wrappers package"). Aliasing to
+  // an actual resolved filesystem path instead sidesteps exports-map
+  // resolution entirely, since Rollup treats an absolute path as already
+  // resolved rather than a specifier to look up - confirmed by actually
+  // downloading the real published libsodium-wrappers.js + libsodium.js,
+  // require()-ing the former by this exact kind of path, and checking
+  // sodium.ready resolves with the crypto functions globals.js needs
+  // (crypto_secretbox_easy, crypto_box_keypair, crypto_sign_open, ...)
+  // all present as real functions - not just reasoned from package
+  // metadata.
+  'libsodium-wrappers': path.resolve(__dirname, './node_modules/libsodium-wrappers/dist/modules/libsodium-wrappers.js'),
 }
 
 const conf = {
