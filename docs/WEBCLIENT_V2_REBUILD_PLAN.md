@@ -510,6 +510,40 @@ This phase gets the new shell to "log in, hand off to the real engine,
 which renders everything else." Phase 5 verifies that hand-off actually
 carries every capability the legacy bundle had.
 
+#### Real build, verified
+
+`npm run build` now succeeds end-to-end against a real deployment (via
+`Rustdesk-Server-Installer`'s `update.sh`, which builds `rustdesk-api-web`
+from source on every update) - not just this session's `node --check`.
+Closes out what was flagged as an open risk earlier in this doc. Getting
+here took three real, live-caught bugs, each fixed and verified against
+actual published package/repo content rather than assumption:
+
+- `message`/`rendezvous` import specifiers needed no file extension for
+  Vite's resolver to find the `.ts` files `ts-proto` generates (`v1`'s own
+  `.js`-suffixed imports relied on a TypeScript compiler this project
+  doesn't have).
+- `SERVER_BRANCH` (used by the install/update scripts' new protobuf-codegen
+  step) defaulted to a branch name (`master`) that doesn't exist on
+  `Chr0mX/rustdesk-server` (actual default: `forapi`) - and even with the
+  right branch, `libs/hbb_common` is a git submodule, so fetching
+  `rustdesk-server`'s own tarball was never going to include its content
+  at all; needed resolving the submodule's real target repo/commit first.
+- `libsodium-wrappers`' published ESM build has a real upstream packaging
+  bug (a relative import that can only ever resolve inside its own
+  package), and its `package.json` `"exports"` map blocks reaching the
+  working CJS build via a subpath specifier - needed an alias to an
+  actual resolved filesystem path to sidestep exports-map resolution
+  entirely.
+
+**Not yet wired to anything visible.** A successful `npm run build`
+produces `dist/webclient.html` + assets, but nothing in `rustdesk-api`
+routes a URL at it yet (that's Phase 6, deliberately last), and even if it
+were reachable, `Engine.vue` would hit its error state immediately - Phase
+2's `flutter build web` still hasn't been run anywhere, so there's no
+`main.dart.js` for it to load. The build succeeding confirms the *source*
+is sound; it doesn't yet mean there's anything to click through.
+
 ### Phase 5 - Feature parity verification
 
 Since the recovered engine (Phase 2) is the real RustDesk client, this
@@ -609,7 +643,13 @@ worth designing further now.
 - No `cargo`/`npm`/Go-module-proxy/apt network access has been available in
   this session's sandbox for build verification generally - every phase
   needs real build/test verification in an environment that actually has
-  it, not just code review.
+  it, not just code review. **Partially resolved for `rustdesk-api-web`**:
+  the actual deployment's `update.sh` now builds it from source on every
+  run and has caught (and driven fixes for) three real bugs no amount of
+  sandboxed code review would have - see "Real build, verified" under
+  Phase 4. Still fully open for Phase 2's Flutter build specifically, and
+  for `rustdesk-api`/`rustdesk-server` Go/Rust builds beyond what this
+  session's `go build`/`cargo` attempts already covered earlier.
 - **Visual styling is now largely out of `rustdesk-api-web`'s control.**
   Phase 4's finding means the dashboard/settings/connection UI a user sees
   is whatever `Chr0mX/rustdesk`'s Dart/Flutter theme produces, not
