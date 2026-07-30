@@ -15,6 +15,60 @@ import CurConn, { testDelay, getApiServer } from './curConn'
 
 let curConn
 
+// bridge.dart's mainGetLocalOption/mainSetLocalOption ("option:local"),
+// and the analogous "option:user:default"/"option:flutter:local" cases,
+// are NOT per-peer connection settings - they're used for things like
+// access_token/user_info (models/user_model.dart's refreshCurrentUser()/
+// getLocalUserInfo(), which is what backs the engine's own Settings ->
+// Account tab), lang, kb_layout, input-source, and hard-settings flags
+// (isDisableAccount/isDisableGroupPanel/etc, all via mainGetLocalOption
+// too). These were previously routed through curConn.getOption/setOption
+// (curConn.js's own `_options`, loaded from globals.getPeers()[id] - a
+// specific PEER's remembered connection settings, only populated after
+// connecting to that peer) - so mainGetLocalOption('access_token') always
+// read undefined/''. That's why the engine's own Account tab showed
+// "not logged in" regardless of this webclient's real (Vue-side) auth
+// state: bind.mainGetLocalOption(key: 'access_token') never saw the
+// access_token curConn.js itself already reads directly from
+// localStorage elsewhere (see _start()'s punch_hole_request) - a plain,
+// unprefixed key, which is also exactly what rustdesk-api's ConfigJs
+// (http/controller/web/index.go) seeds. So "option:local" reads/writes
+// plain localStorage keys directly (no extra namespacing - deliberately
+// matching what's already there for access_token/user_info), while
+// "option:user:default"/"option:flutter:local" get their own namespaced
+// prefixes only to avoid colliding with option:local's plain keys or
+// each other - nothing external needs to read those two.
+function getLocalOption (key) {
+  return localStorage.getItem(key) || ''
+}
+function setLocalOption (key, value) {
+  if (value === undefined || value === null) {
+    localStorage.removeItem(key)
+  } else {
+    localStorage.setItem(key, value)
+  }
+}
+function getUserDefaultOption (key) {
+  return localStorage.getItem('option:user:default:' + key) || ''
+}
+function setUserDefaultOption (key, value) {
+  if (value === undefined || value === null) {
+    localStorage.removeItem('option:user:default:' + key)
+  } else {
+    localStorage.setItem('option:user:default:' + key, value)
+  }
+}
+function getFlutterLocalOption (key) {
+  return localStorage.getItem('option:flutter:local:' + key) || ''
+}
+function setFlutterLocalOption (key, value) {
+  if (value === undefined || value === null) {
+    localStorage.removeItem('option:flutter:local:' + key)
+  } else {
+    localStorage.setItem('option:flutter:local:' + key, value)
+  }
+}
+
 export function initBridge () {
   curConn = new CurConn()
   testDelay()
@@ -96,11 +150,19 @@ export function initBridge () {
       case 'send_2fa':
         curConn?.send2fa(arg)
         break
-      case 'option:local':
-      case 'option:flutter:local':
+      case 'option:local': {
+        const e = JSON.parse(arg)
+        setLocalOption(e.name, e.value)
+        break
+      }
+      case 'option:flutter:local': {
+        const e = JSON.parse(arg)
+        setFlutterLocalOption(e.name, e.value)
+        break
+      }
       case 'option:user:default': {
         const e = JSON.parse(arg)
-        curConn.setOption(e.name, e.value)
+        setUserDefaultOption(e.name, e.value)
         break
       }
       case 'option:flutter:peer': {
@@ -204,9 +266,13 @@ export function initBridge () {
         result = getApiServer()
         break
       case 'option:local':
+        result = getLocalOption(arg)
+        break
       case 'option:flutter:local':
+        result = getFlutterLocalOption(arg)
+        break
       case 'option:user:default':
-        result = curConn?.getOption(arg)
+        result = getUserDefaultOption(arg)
         break
       case 'option:flutter:peer':
         result = curConn?.getFlutterUiOption(arg)
