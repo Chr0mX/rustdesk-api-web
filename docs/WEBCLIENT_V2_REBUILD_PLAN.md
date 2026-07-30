@@ -169,6 +169,108 @@ a real open question from this session, not busywork:
 Exit criteria: a short written note (append to this doc) answering all four,
 before Phase 2 work starts.
 
+#### Phase 1 findings
+
+Investigated via static analysis of the compiled bundle (`resources/web` in
+`rustdesk-api`) plus a headless-Chromium reproduction of it served locally,
+and direct comparison against `rustdesk-server`'s current
+`libs/hbb_common/protos/*.proto` and `v1`'s recovered source. Full `protoc`
+codegen and a real network connection test were not possible in this
+session's sandbox (no outbound access to npm/apt/Go-module-proxy hosts, nor
+to the user's live server) - noted per item below where that matters.
+
+1. **`main.dart.js` / `js/dist/index.js` split - partially resolved, one
+   concrete question left for a live check.** Static analysis initially
+   suggested `js/dist/index.js` was a fully independent app (it owns the
+   WebSocket transport - confirmed via the exact `WebSock.onopen`/
+   `WebSock.onclose` debug strings living in `index.js`, not
+   `main.dart.js` - and it eagerly spins up its own `ffmpeg-core.wasm`/
+   `libopus.wasm` Web Workers on load). But a live reproduction (serving
+   the bundle locally, headless Chromium, a stubbed `/webclient-config/
+   index.js` matching the real unauthenticated response) showed
+   **`index.js` renders no visible UI at all** in that environment, even
+   though `index.js`/`vendor.js` load and execute cleanly (a `"listen
+   fullscreen"` console log confirms it runs) - while `main.dart.js` was
+   simultaneously fetching a real Flutter asset bundle (`FontManifest.json`
+   plus custom icon fonts literally named `tabbar.ttf`, `peer_searchbar.ttf`,
+   `address_book.ttf`, `device_group.ttf`, `more.ttf`, `gestures.ttf` - font
+   names that read like a full peer-dashboard UI, not just a remote-desktop
+   canvas) but never finished initializing, because its `CanvasKit` renderer
+   fetch to `gstatic.com` failed (this sandbox has no route there). Static
+   search of `index.js`/`vendor.js` found **zero** references to
+   `canvaskit`/`flt-glass-pane`/`_flutter` - no explicit code-level
+   coordination between the two was found, so the blank UI isn't `index.js`
+   deliberately waiting on Flutter; something else about the synthetic test
+   (most likely just "no reachable backend/session" - a real deployment
+   always has one) is the more likely explanation. Bottom line: **the
+   Flutter asset-bundle evidence is enough to say `main.dart.js` is not
+   obviously vestigial and may still own real UI surface**, which is a
+   materially bigger finding than "probably just a leftover build" - this
+   needs a 2-minute check against a real, live deployment (which this
+   sandbox cannot reach) before Phase 2 proceeds on the assumption that
+   porting `v1` + writing a new UI is a complete substitute: open
+   `/webclient/` with DevTools, check whether `canvaskit.js` loads and a
+   `<flt-glass-pane>` element appears, and try blocking `main.dart.js`
+   entirely to see if the dashboard/connection flow still works unchanged.
+2. **hbbs/hbbr WebSocket wire compatibility - confirmed compatible.**
+   `rustdesk-server`'s `rendezvous_server.rs`/`relay_server.rs` accept a
+   plain WebSocket (`tokio_tungstenite::accept_hdr_async`) on `id-server
+   port + 2` (rendezvous) and `+ 3` (relay) respectively, carrying the
+   *same* protobuf bytes as the plain-TCP path as WS binary frames -
+   exactly matching `v1`'s `connection.ts` (`getrUriFromRs`: `SCHEMA =
+   "ws://"`, `+2`/`+3` offsets, `roffset || 3`). The "WS real ip" fix
+   (`X-Real-IP`/`X-Forwarded-For` header parsing in the WS upgrade
+   callback) is server-side-only and transparent to any client. One real
+   gap found, unrelated to protocol drift: `v1` has **no concept at all**
+   of `app.ws-host`/`window.ws_host` (the single reverse-proxied `wss://`
+   URL override this session's earlier work relies on for non-raw-port
+   deployments) - and a search of the *current compiled bundle* itself
+   found **zero** references to `ws_host` either, in any of
+   `main.dart.js`/`index.js`/`vendor.js`. That's worth an explicit callout:
+   either `ws_host` is consumed somewhere this search didn't catch, or it's
+   effectively dead configuration in the current deployment - a live check
+   (does changing `app.ws-host` actually change what the webclient connects
+   to?) is recommended, independent of this rebuild, since Phase 2 needs to
+   decide whether to build `ws_host` support fresh (if it's a real,
+   used feature) or drop it (if it never worked).
+3. **Codec approach - decided: reuse the existing WASM pipeline.**
+   Confirmed via string search that the compiled bundle uses **zero**
+   `WebCodecs` APIs (the one apparent match was a false positive -
+   `e.video_frame`, a protobuf field access, not the `VideoFrame`
+   constructor) - it's 100% `ffmpeg-core.wasm` (video) +
+   `libopus.wasm` (audio) via Web Workers, both already proven against
+   this exact server's encoder output. Reuse those same two WASM binaries
+   as-is rather than introducing `WebCodecs`: no new toolchain, no browser
+   support regression, and `v1`'s OGV.js-based `codec.js` needs full
+   replacement either way (different codec family entirely), so there's no
+   "wasted v1 code" cost to this choice.
+4. **Protobuf codegen spike - no wire-breaking drift found, but not
+   actually run.** `protoc`/`ts-proto` couldn't be installed in this
+   sandbox (no apt/npm access), so this is a field-level comparison, not an
+   executed codegen + compile check. Every message/enum `v1`'s
+   `connection.ts`/`websock.ts` reference (`LoginRequest`, `PeerInfo`,
+   `OptionMessage`(`_BoolOption`), `VideoFrame`, `MouseEvent`, `KeyEvent`,
+   `SwitchDisplay`, `Hash`, `IdPk`, `PublicKey`, `Misc`, `ImageQuality`;
+   `RendezvousMessage`, `PunchHoleRequest`/`Response`, `RequestRelay`,
+   `RelayResponse`, `ConnType`, `NatType`) still exists, unchanged in kind,
+   in `rustdesk-server`'s current `.proto` files - protobuf's field-number
+   stability guarantees mean new fields don't break old generated code.
+   Real drift found is additive, not breaking: `LoginRequest.union` gained
+   `view_camera`/`terminal` variants (fields 15/16, i.e. the newest
+   additions) alongside the existing `file_transfer`/`port_forward`, and
+   `OptionMessage` gained toggles like `disable_camera`/
+   `terminal_persistent`/`follow_remote_cursor`. The `view_camera` login
+   mode is a genuinely new finding, not previously called out anywhere in
+   this plan - **RustDesk apparently has a "view a peer's camera" connection
+   mode distinct from screen sharing**; worth confirming whether the
+   current compiled webclient's UI actually exposes it, since if so it
+   belongs alongside file transfer/terminal in the Scope section's "any
+   additional user-facing features" catch-all. **Still needed before Phase
+   2 proceeds**: an actual `protoc --ts_proto_out` run + `tsc` compile
+   against the ported `connection.ts`, in an environment with real network
+   access, to catch anything a field-name-only comparison would miss (e.g.
+   type changes on an existing field, not just additions).
+
 ### Phase 2 - Transport + protocol layer
 
 - Port `websock.ts` into `rustdesk-api-web` (TypeScript, framework-agnostic -
@@ -292,10 +394,19 @@ ships and the webclient has been stable for a bit; premature to design now.
 
 - Phase 1 finding that `main.dart.js` is load-bearing for something
   non-trivial would meaningfully change scope - treat Phase 1 as a real
-  go/no-go gate, not a formality.
+  go/no-go gate, not a formality. **Still open**: the Phase 1 spike (see
+  findings above) found real evidence (a genuine Flutter font/asset bundle
+  with peer-dashboard-shaped icon names) that cuts against "vestigial," but
+  couldn't reach a live deployment to confirm either way. Don't start
+  Phase 4 UI work assuming `main.dart.js` is dead weight until that's
+  checked against a real, running `/webclient/`.
 - Protocol drift since `v1` was last touched (mid-2024) is the single
   biggest unknown - Phase 1 item 4 and Phase 2's isolated connection test
   exist specifically to surface this early, before UI work depends on it.
+  Phase 1's field-level comparison (no sandbox `protoc` access) found no
+  breaking drift, only additive fields/messages (`view_camera`, `terminal`,
+  new `OptionMessage` toggles) - a real `protoc` + compile run is still
+  needed to be sure, per the findings above.
 - No `cargo`/`npm`/Go-module-proxy network access has been available in
   this session's sandbox for build verification - every phase needs real
   build/test verification in an environment that actually has it, not just
