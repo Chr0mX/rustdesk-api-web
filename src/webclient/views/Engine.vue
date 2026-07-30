@@ -25,7 +25,7 @@
   import { useRouter } from 'vue-router'
   import { Loading } from '@element-plus/icons'
   import { initBridge } from '@/webclient/connection/bridge'
-  import { logout } from '@/webclient/api/user'
+  import { logout, clearSharedWebclientConfig } from '@/webclient/api/user'
   import { useWebclientUserStore } from '@/webclient/store/user'
 
   const router = useRouter()
@@ -122,6 +122,12 @@
     clearDocumentBase()
     await logout().catch(() => {})
     userStore.clearLocal()
+    // Matches ConfigJs's own clearConfigScript - without this the
+    // connection config a previous /webclient-config/index.js load wrote
+    // (custom-rendezvous-server/api-server/relay-server/key/access_token/
+    // user_info) would keep sitting in localStorage after logout instead
+    // of actually being cleared.
+    clearSharedWebclientConfig()
     await router.push({ name: 'WebclientLogin' })
   }
 </script>

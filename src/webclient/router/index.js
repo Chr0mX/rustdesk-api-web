@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useWebclientUserStore } from '@/webclient/store/user'
+import { tryWebclientSessionBridge } from '@/webclient/api/user'
 
 const routes = [
   {
@@ -35,9 +36,24 @@ export const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, from, next) => {
+// Attempted at most once per app load (not on every navigation) - a
+// visitor who genuinely has no session shouldn't pay a network round trip
+// on every route change, and a successful bridge already leaves
+// userStore.token set for every check after the first.
+let bridgeAttempted = false
+
+router.beforeEach(async (to, from, next) => {
   const userStore = useWebclientUserStore()
   if (to.meta.requiresAuth && !userStore.token) {
+    if (!bridgeAttempted) {
+      bridgeAttempted = true
+      const bridged = await tryWebclientSessionBridge()
+      if (bridged) {
+        userStore.setUser(bridged)
+        next()
+        return
+      }
+    }
     next({ name: 'WebclientLogin' })
   } else {
     next()
