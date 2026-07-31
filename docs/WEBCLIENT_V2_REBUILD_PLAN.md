@@ -439,6 +439,54 @@ shell's `curConn`-equivalent implement the matching `setByName` cases" -
 a concrete, enumerable checklist (the case names above), not an open-ended
 reverse-engineering task.
 
+#### Phase 3 correction (found live, post-cutover): don't guess `setByName`/`getByName` case names
+
+`bridge.js`'s case list was largely written by inference/analogy (matching
+names against the legacy compiled bundle's own dispatcher, or just
+plausible-sounding names) before a real engine build existed to check
+against live. Two of those guesses were wrong in a way that fully broke the
+connect flow, only caught after Phase 6 cutover via a real deployment's
+console log: the recovered engine never calls `setByName("connect", ...)`
+or `setByName("close")` at all. The actual names, confirmed directly in
+`flutter/lib/web/bridge.dart`:
+
+- **Connect** = `bind.sessionAddSync()` immediately followed by
+  `bind.sessionStart()` → `setByName("session_add_sync", ...)` (JSON:
+  `id`/`password`/`is_shared_password`/`isFileTransfer`/`isViewCamera`/
+  `isTerminal`) then `setByName("session_start", ...)` (JSON: `{id}`).
+- **Disconnect** = `sessionClose()` → `setByName("session_close")`.
+
+Because both were unhandled, every connect attempt silently fell through to
+the `default`/unhandled-case branch - no error, no log line, nothing -
+which is why the symptom looked like "settings are fine but nothing happens
+when I try to connect" rather than a visible crash. Fixed in
+`rustdesk-api-web` PR #43.
+
+**Methodology lesson for any future `bridge.js` case work**: don't infer a
+`setByName`/`getByName` name from what seems plausible or from the legacy
+bundle's *variable* names - grep the exact literal string at the real call
+site in the recovered Dart source, and do it across **all** of
+`flutter/lib/web/` (`bridge.dart`, `web_unique.dart`, `custom_cursor.dart`,
+`common.dart`) plus `flutter/lib/models/web_model.dart`, not just
+`bridge.dart` alone (e.g. `send_local_files` lives in `web_unique.dart`,
+not `bridge.dart`). Use a multiline-aware search
+(`callMethod\(\s*'(setByName|getByName)'\s*,\s*\[\s*'([^']+)'` with
+`re.DOTALL`, or equivalent) - a plain single-line grep misses call sites
+where the method name is split onto its own line inside the argument list,
+which is most of them.
+
+**Known-unverified, currently-unhandled cases found by that same audit**
+(fall through to `default`/console.warn today - not confirmed broken in
+practice yet, since none were hit in the log that surfaced the connect
+bug, but worth a dedicated pass before relying on them): bare `option`
+(`mainGetOption`/`mainSetOption` - distinct from `option:local`/
+`option:session`/etc.), `option:peer` (`mainGetPeerOption`/
+`mainSetPeerOption` - arbitrary-peer-by-id, distinct from the
+currently-connected-peer-scoped `option:flutter:peer`), `load_recent_peers`/
+`load_recent_peers_sync`/`load_fav_peers`/`peer_exists`/`peer_has_password`/
+`remove_peer` (recent-peers/favorites convenience UI - not on the
+manual "enter an ID and connect" path this fix covers).
+
 ### Phase 4 - Core UI (Vue shell + engine bootstrap)
 
 #### Phase 4 finding that changed this phase's scope
