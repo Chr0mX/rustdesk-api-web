@@ -615,6 +615,74 @@ Exit criteria: every item in the Scope section's "in scope" list works in
 the new shell + recovered engine, or has an explicitly recorded, approved
 exception appended to this doc.
 
+#### Phase 5 findings (retroactive - done post-cutover, not before)
+
+Phase 6 shipped before this phase was formally run (see Phase 6's own
+notes - cutover became urgent once the connect/video-decode bugs below
+were found live). This is the deferred pass, done by cross-referencing
+every `setByName`/`getByName` call site across all of `flutter/lib/web/`
+(not just `bridge.dart`) against `bridge.js`'s actual case list, then
+checking each matched case's `curConn.js` implementation for whether it's
+real or a stub. ~60 distinct engine↔shell calls audited: 19 confirmed
+working, 15 wired to an explicit stub (visible in the UI, does nothing),
+19 have no handler at all (silently unhandled), 9 are a hard platform
+ceiling (`web/bridge.dart` itself throws `UnimplementedError` - not
+reachable from any web build, ours or legacy's, so not a parity gap).
+
+**Working** (includes several fixed live this session, via PRs #43-#48):
+connect/disconnect lifecycle, reconnect, video decode (all 5 codecs, via
+ffmpeg-core.wasm), mouse input, remote cursor image, keyboard (Legacy
+mode), quality monitor + toolbar indicator (delay/bitrate/fps/speed/codec/
+chroma), scroll/view style, image quality, show-quality-monitor toggle,
+personal/shared address book, groups, network settings, Account tab,
+"this desktop" server-settings defaults, UI text (~140 strings via the
+new `translations.js`, sourced from the engine's own `src/lang/en.rs`).
+
+**Stubbed** (UI present, does nothing - `curConn.js`'s own `console.warn`
+stubs, or newly found this pass): custom image quality, custom FPS, codec
+switching, alternative-codecs list, audio playback (`initAudio`/
+`playAudio` in `globals.js` - same shape as the video-decode gap that's
+now fixed, needs libopus.wasm wired up the same way), file
+transfer/browse/cancel-job (already flagged as needing real protocol
+work), virtual display, privacy mode, elevation (direct + with-logon),
+restart, per-session login 2FA, live online-status polling
+(`query_onlines`), language picker (English-only), audit notes
+(`send_note`/`setAuditGuid` - the audit-server URL itself is now wired).
+
+**Missing entirely** (falls through to the generic unhandled-case
+warning - no prior stub at all): keyboard Map Mode (`flutter_key_event` -
+needs the full USB-HID→RustDesk keycode table, same class of gap as
+`input_key`'s own `mapKey()`/`KEY_MAP`, see item 4 above), local→remote
+clipboard (peer→local already works; sync is currently one-way) and
+multi-format clipboard (`multi_clipboards`, only the older single-format
+`clipboard` message is handled), terminal (open/close/resize/send-input -
+the whole feature area), file management (`select_files`/`create_dir`/
+`rename_file`/`remove_file`/`remove_all_empty_dirs`/
+`read_dir_to_remove_recursive`/`confirm_override_file`), account-auth
+(`account_auth`/`account_auth_cancel`/`account_auth_result` - worth a
+live check for reachability given the 2FA-setup platform-ceiling item
+below), recent peers, favorite peers, per-peer alias/existence/password
+checks (`option:peer`/`peer_exists`/`peer_has_password`), remove-peer,
+peer-sent message boxes (the wire-level `message_box` field - distinct
+from this client's own internally-generated msgbox calls, which do
+work), and several low-traffic info getters (`envvar`, `build_date`,
+`conn_session_id`, `last_audit_note`, `platform`, `resolve_avatar_url`,
+`local_os`, `fav`).
+
+**Platform ceiling** (not a gap - `web/bridge.dart` throws
+`UnimplementedError` directly): LAN discovery, RDP tunneling, acting as a
+host (Connection Manager functions), voice calls, Wake-on-LAN, the plugin
+system, native installer flows, account-level 2FA setup (`mainGenerate2Fa`/
+`mainVerify2Fa`/`mainVerifyBot` - distinct from per-session login 2FA
+above, which *is* reachable), native trackpad-speed tuning, native
+screenshot capture.
+
+Recommended order (impact vs. effort): audio playback → recent/favorite
+peer lists → hide-or-implement the currently-stubbed toolbar controls
+(they currently look fully functional and silently aren't) → local→remote
+clipboard → file transfer → terminal → keyboard Map Mode → remaining small
+getters.
+
 ### Phase 6 - Cutover
 
 - Switch `/webclient`: `rustdesk-api` points `router.go`'s
