@@ -11,7 +11,7 @@
 // registered BY the Flutter engine itself (see web_model.dart), and
 // globals.js's draw()/pushEvent() call them. This file only owns the
 // Dart -> JS direction.
-import CurConn, { testDelay, getApiServer } from './curConn'
+import CurConn, { testDelay, getApiServer, queryOnlines } from './curConn'
 import translations from './translations'
 
 // getByName("get_version_number")'s encoding - ported verbatim from the
@@ -533,20 +533,18 @@ export function initBridge () {
       case 'load_group':
         loadCachedEntries('group_cache', { access_token: '', users: [], peers: [] }, 'onLoadGroupFinished')
         break
-      // bridge.dart's queryOnlines() asks the rendezvous server whether a
-      // batch of peer IDs are currently online, expecting the result back
-      // via a pushEvent("callback_query_onlines", {onlines, offlines})
+      // bridge.dart's queryOnlines() asks hbbs (the rendezvous server)
+      // whether a batch of peer IDs are currently online, via a real
+      // RendezvousMessage.online_request/.online_response round trip over
+      // a short-lived WebSocket - decompiled from the actual legacy
+      // webclient bundle (an earlier pass here wrongly assumed this
+      // needed new backend work; it doesn't). Result comes back via
+      // pushEvent("callback_query_onlines", {onlines, offlines})
       // (comma-separated ID strings - see models/peer_model.dart's
-      // _updateOnlineState). That's a real rendezvous-protocol round trip
-      // (an online-status request message), not just missing plumbing -
-      // no different in kind from curConn.js's other new-protocol stubs
-      // (file transfer, terminal, 2FA - see its own README.md item 5).
-      // Silently doing nothing here just means peers show their
-      // last-known/offline state instead of live online status - visible
-      // but not broken, unlike the ab/group cases above which were
-      // actively throwing.
+      // _updateOnlineState). See curConn.js's queryOnlines() for the wire
+      // details.
       case 'query_onlines':
-        console.warn('setByName("query_onlines") not implemented - see bridge.js', arg)
+        queryOnlines(arg)
         break
       // models/input_model.dart's newKeyboardMode -> sessionHandleFlutterKeyEvent,
       // used when the session's keyboard mode is "map" (Settings ->
