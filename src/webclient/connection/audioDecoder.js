@@ -66,17 +66,39 @@ class PcmPlayer {
 
 let worker = null
 let player = null
+// The last {channels, sampleRate} init message, re-sent if the worker had
+// to be recreated after a premature-call crash - see createWorker() below.
+let pendingInit = null
+
+// libopus.js registers its `message` listener synchronously at the top of
+// the script, but the actual WASM runtime (Module._Decoder_new etc.)
+// finishes loading asynchronously - a message sent immediately after
+// `new Worker(...)` can (and, confirmed live, does) arrive before the
+// module is ready, crashing with "Aborted(Assertion failed: native
+// function `Decoder_new` called before runtime initialization)".
+// Emscripten's abort() poisons the whole module instance permanently, so
+// simply retrying the same worker isn't safe - self-heal by tearing down
+// and recreating it, then replaying the last init message.
+function createWorker () {
+  const w = new Worker('./libopus.js')
+  w.onmessage = (e) => {
+    if (player && e.data?.length) player.feed(e.data)
+  }
+  w.onerror = (e) => {
+    console.warn('libopus worker crashed (likely a startup race) - recreating: ' + e.message)
+    w.terminate()
+    worker = createWorker()
+    if (pendingInit) worker.postMessage(pendingInit)
+  }
+  return w
+}
 
 export function initAudio (channels, sampleRate) {
-  if (!worker) {
-    worker = new Worker('./libopus.js')
-    worker.onmessage = (e) => {
-      if (player && e.data?.length) player.feed(e.data)
-    }
-  }
+  pendingInit = { channels, sampleRate }
+  if (!worker) worker = createWorker()
   player?.close()
   player = new PcmPlayer(channels, sampleRate)
-  worker.postMessage({ channels, sampleRate })
+  worker.postMessage(pendingInit)
 }
 
 export function playAudio (packet) {
@@ -87,6 +109,7 @@ export function playAudio (packet) {
 export function closeAudio () {
   worker?.terminate()
   worker = null
+  pendingInit = null
   player?.close()
   player = null
 }
