@@ -640,6 +640,7 @@ export default class CurConn {
     globals.msgbox('success', 'Successful', 'Connected, waiting for image...')
     globals.pushEvent('peer_info', pi)
     this.recordRecentPeer(pi)
+    if (pi.encoding) this._supportedEncoding = pi.encoding
     const p = this.shouldAutoLogin()
     if (p) this.inputOsPassword(p)
     const username = this.getOption('info')?.username
@@ -733,6 +734,12 @@ export default class CurConn {
     } else if (misc.switch_display) {
       this.loadVideoDecoder()
       globals.pushEvent('switch_display', misc.switch_display)
+    } else if (misc.supported_encoding) {
+      // A later re-negotiation of the peer's own codec support (e.g. after
+      // it toggles hardware encoding) - handlePeerInfo already sets this
+      // from peer_info.encoding on connect; this keeps getAlternativeCodecs()
+      // current if it changes mid-session.
+      this._supportedEncoding = misc.supported_encoding
     } else if (misc.close_reason) {
       globals.msgbox('error', 'Connection Error', misc.close_reason)
       this.close()
@@ -959,31 +966,66 @@ export default class CurConn {
     this._videoDecoderReady = initVideoDecoder().catch((e) => console.error('Failed to load video decoder', e))
   }
 
-  // --- Everything below is NOT in v1 - stubs matching the setByName/
-  // getByName cases Phase 3 found in the live compiled bundle that v1
-  // never had (file transfer, terminal, virtual display, elevation, 2FA,
-  // codec switching). v1's connection.ts predates all of these - they were
-  // added to the real protocol after v1 was last touched (see Phase 1
-  // findings item 4: LoginRequest.union gained view_camera/terminal,
-  // OptionMessage gained disable_camera/terminal_persistent, etc.).
-  // Implementing these needs the actual wire messages for each, which
-  // isn't recoverable from v1 - has to be worked out against a real
-  // connection once Phase 2's engine build exists to compare against. ---
+  // --- Everything below is NOT in v1 - the setByName/getByName cases
+  // Phase 3 found in the live compiled bundle that v1 never had (file
+  // transfer, terminal, virtual display, elevation, 2FA, codec switching).
+  // v1's connection.ts predates all of these - they were added to the real
+  // protocol after v1 was last touched (see Phase 1 findings item 4:
+  // LoginRequest.union gained view_camera/terminal, OptionMessage gained
+  // disable_camera/terminal_persistent, etc.). The message shapes below
+  // (ToggleVirtualDisplay, TogglePrivacyMode, ElevationRequest,
+  // ElevationRequestWithLogon, SupportedDecoding.PreferCodec, Chroma,
+  // CodecAbility) are confirmed directly against hbb_common's real
+  // message.proto (rustdesk/hbb_common@master, libs/hbb_common/protos/
+  // message.proto), not guessed or inferred from the legacy bundle's
+  // minified field names alone - the legacy bundle's own control flow
+  // (which fields get set when, e.g. custom_image_quality's `<< 8` shift)
+  // was still used to confirm behavior, decompiled from resources/web/
+  // js/dist/index.js. ---
 
-  toggleVirtualDisplay (value) {
-    console.warn('toggleVirtualDisplay() not implemented', value)
+  toggleVirtualDisplay (arg) {
+    try {
+      const { index, on } = JSON.parse(arg)
+      const toggle_virtual_display = message.ToggleVirtualDisplay.fromPartial({ display: index, on })
+      const misc = message.Misc.fromPartial({ toggle_virtual_display })
+      this._ws?.sendMessage({ misc })
+    } catch (e) {
+      console.log(`Failed to toggle virtual display, invalid param "${arg}"`)
+    }
   }
 
-  togglePrivacyMode (value) {
-    console.warn('togglePrivacyMode() not implemented', value)
+  togglePrivacyMode (arg) {
+    try {
+      const { impl_key, on } = JSON.parse(arg)
+      const toggle_privacy_mode = message.TogglePrivacyMode.fromPartial({ impl_key, on })
+      const misc = message.Misc.fromPartial({ toggle_privacy_mode })
+      this._ws?.sendMessage({ misc })
+    } catch (e) {
+      console.log(`Failed to toggle privacy mode, invalid param "${arg}"`)
+    }
   }
 
+  // bridge.dart's sessionSetCustomImageQuality passes a raw int (not JSON),
+  // so `value` arrives here as a genuine JS number already. The `<< 8`
+  // shift matches hbb_common's own convention for this field (the low
+  // byte is reserved, only the native client's Rust side actually reads
+  // the shifted-out bits) - confirmed against the legacy bundle's own
+  // identical shift, not something to "clean up".
   setCustomImageQuality (value) {
-    console.warn('setCustomImageQuality() not implemented', value)
+    const custom_image_quality = value << 8
+    const option = message.OptionMessage.fromPartial({ custom_image_quality })
+    const misc = message.Misc.fromPartial({ option })
+    this._ws?.sendMessage({ misc })
+    this.setOption('custom_image_quality', value.toString())
+    this.setOption('image_quality', 'custom')
   }
 
-  setCustomFps (value) {
-    console.warn('setCustomFps() not implemented', value)
+  setCustomFps (fps) {
+    const option = message.OptionMessage.fromPartial({ custom_fps: fps })
+    const misc = message.Misc.fromPartial({ option })
+    this._ws?.sendMessage({ misc })
+    this._lastSendFps = fps
+    this.setOption('custom-fps', fps.toString())
   }
 
   send2fa (code) {
@@ -991,20 +1033,74 @@ export default class CurConn {
   }
 
   elevateDirect () {
-    console.warn('elevateDirect() not implemented')
+    const elevation_request = message.ElevationRequest.fromPartial({ direct: true })
+    const misc = message.Misc.fromPartial({ elevation_request })
+    this._ws?.sendMessage({ misc })
+    this._elevationRequested = true
   }
 
-  elevateWithLogon (value) {
-    console.warn('elevateWithLogon() not implemented', value)
+  elevateWithLogon (arg) {
+    try {
+      const { username, password } = JSON.parse(arg)
+      const logon = message.ElevationRequestWithLogon.fromPartial({ username, password })
+      const elevation_request = message.ElevationRequest.fromPartial({ logon })
+      const misc = message.Misc.fromPartial({ elevation_request })
+      this._ws?.sendMessage({ misc })
+      this._elevationRequested = true
+    } catch (e) {
+      console.error('Failed to elevate with logon', e)
+    }
   }
 
-  changePreferCodec (value) {
-    console.warn('changePreferCodec() not implemented', value)
+  // Ignores its own arg on purpose - bridge.dart's sessionChangePreferCodec
+  // takes none either (matches the legacy bundle's own zero-arg version).
+  // The actual codec preference is already stored via the existing
+  // option:session plumbing (Settings writes "codec-preference"/"i444"
+  // through setOption like any other session option) - this just re-sends
+  // the resulting capability set to the peer.
+  changePreferCodec () {
+    const supported_decoding = this.getSupportedDecoding()
+    const option = message.OptionMessage.fromPartial({ supported_decoding })
+    const misc = message.Misc.fromPartial({ option })
+    this._ws?.sendMessage({ misc })
   }
 
+  getSupportedDecoding () {
+    const PreferCodec = message.SupportedDecoding_PreferCodec
+    const codecPref = this.getOption('codec-preference')
+    let prefer = PreferCodec.Auto
+    if (codecPref === 'vp8') prefer = PreferCodec.VP8
+    else if (codecPref === 'vp9') prefer = PreferCodec.VP9
+    else if (codecPref === 'av1') prefer = PreferCodec.AV1
+    else if (codecPref === 'h264') prefer = PreferCodec.H264
+    else if (codecPref === 'h265') prefer = PreferCodec.H265
+    const prefer_chroma = this.getOption('i444') === 'Y' ? message.Chroma.I444 : message.Chroma.I420
+    return message.SupportedDecoding.fromPartial({
+      ability_vp8: 1,
+      ability_vp9: 1,
+      ability_av1: 1,
+      ability_h264: 1,
+      ability_h265: 1,
+      prefer,
+      prefer_chroma,
+      i444: message.CodecAbility.fromPartial({ vp9: true, av1: true }),
+    })
+  }
+
+  // Backs the codec picker in Settings - which codecs it's actually worth
+  // offering depends on both what the peer can encode (_supportedEncoding,
+  // set from peer_info.encoding in handlePeerInfo) and what this browser
+  // claims it can decode (getSupportedDecoding's ability_* fields, which
+  // are unconditionally 1 above - ffmpeg-core.wasm decodes all five).
   getAlternativeCodecs () {
-    console.warn('getAlternativeCodecs() not implemented')
-    return JSON.stringify([])
+    const enc = this._supportedEncoding || {}
+    const dec = this.getSupportedDecoding()
+    return JSON.stringify({
+      vp8: !!enc.vp8 && dec.ability_vp8 === 1,
+      av1: !!enc.av1 && dec.ability_av1 === 1,
+      h264: !!enc.h264 && dec.ability_h264 === 1,
+      h265: !!enc.h265 && dec.ability_h265 === 1,
+    })
   }
 
   sendNote (connId, note) {
@@ -1032,7 +1128,9 @@ export default class CurConn {
   }
 
   restart () {
-    console.warn('restart() not implemented')
+    this._restartingRemoteDevice = true
+    const misc = message.Misc.fromPartial({ restart_remote_device: true })
+    this._ws?.sendMessage({ misc })
   }
 
   getStatus () {
