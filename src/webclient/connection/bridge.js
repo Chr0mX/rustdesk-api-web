@@ -469,6 +469,18 @@ export function initBridge () {
       case 'cancel_job':
         curConn?.cancelJob(arg)
         break
+      case 'create_dir':
+        curConn?.createDir(arg)
+        break
+      case 'remove_file':
+        curConn?.removeFile(arg)
+        break
+      case 'rename_file':
+        curConn?.renameFile(arg)
+        break
+      case 'select_files':
+        curConn?.selectFiles(arg)
+        break
       case 'save_ab':
         localStorage.setItem('ab_cache', arg)
         break
