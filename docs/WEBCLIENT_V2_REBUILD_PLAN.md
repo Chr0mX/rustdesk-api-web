@@ -623,9 +623,9 @@ were found live). This is the deferred pass, done by cross-referencing
 every `setByName`/`getByName` call site across all of `flutter/lib/web/`
 (not just `bridge.dart`) against `bridge.js`'s actual case list, then
 checking each matched case's `curConn.js` implementation for whether it's
-real or a stub. ~65 distinct engine↔shell calls audited, current count:
-43 confirmed working, 5 wired to an explicit stub (visible in the UI,
-does nothing), 5 have no handler at all (silently unhandled), 12 are a
+real or a stub. ~66 distinct engine↔shell calls audited, current count:
+45 confirmed working, 4 wired to an explicit stub (visible in the UI,
+does nothing), 4 have no handler at all (silently unhandled), 13 are a
 hard platform ceiling (`web/bridge.dart` itself throws
 `UnimplementedError` - not reachable from any web build, ours or
 legacy's, so not a parity gap). Updated same day as first written -
@@ -635,79 +635,95 @@ audio, the Recents tab, and the whole stubbed-toolbar batch (PRs
 change needed), most of file transfer (PR #56 - remote dir browsing,
 create/rename/remove, the local file picker, single-file download and
 upload, cancel), terminal support end to end (PR #58 - open/close,
-input, resize, output), and the remaining small getters (PR #61 - peer
-platform, message boxes, envvar, misc info) close out most of the rest.
+input, resize, output), the remaining small getters (PR #61 - peer
+platform, message boxes, envvar, misc info), and (PR #63) chat and
+keyboard Map Mode close out most of the rest.
 **Correction** (PR #60): Legacy-mode keyboard input had been wrongly
 marked working in the initial pass of this audit - `mapKey()` was still
 a stub returning `undefined` unconditionally, so `inputKey()`'s
 `if (!key_event) return` guard made every keystroke a silent no-op the
 whole time mouse/video/audio were being fixed and verified as working.
-Now fixed for real. See below for what's still open. A published audit
-artifact with the full per-feature breakdown exists alongside this doc
-(not repo-tracked, ask if you need the link regenerated).
+Now fixed for real. **Also fixed live** (PR #63): a real crash in
+`libopus.js`'s worker startup, confirmed via a browser console log -
+its `message` listener is registered synchronously, but the WASM
+runtime loads asynchronously, so a message sent right after
+`new Worker(...)` could arrive before the module was ready, crashing
+with "Aborted... `Decoder_new` called before runtime initialization"
+and permanently poisoning that worker (Emscripten's `abort()` doesn't
+allow in-place recovery). Now self-heals: recreate the worker and
+replay the last init message. See below for what's still open. A
+published audit artifact with the full per-feature breakdown exists
+alongside this doc (not repo-tracked, ask if you need the link
+regenerated).
 
-**Working** (includes many fixed live this session, via PRs #43-#61):
+**Working** (includes many fixed live this session, via PRs #43-#63):
 connect/disconnect lifecycle, reconnect, video decode (all 5 codecs, via
 ffmpeg-core.wasm), audio playback (via libopus.wasm, same reuse-not-
-rebuild approach), mouse input, remote cursor image, keyboard - Legacy
-mode (`mapKey()` vendors the real `KEY_MAP` table, already generated and
-checked into `rustdesk-api`'s own legacy v1 webclient source at
-`resources/web/js/src/gen_js_from_hbb.ts` - see the correction above),
-quality monitor + toolbar indicator (delay/bitrate/fps/speed/codec/
-chroma), scroll/view style, image quality, custom image quality, custom
-FPS, codec switching, alternative-codecs list, show-quality-monitor
-toggle, virtual display, privacy mode, elevation (direct + with-logon),
-restart, personal/shared address book, groups, recent peers (no native
-history file to read on web, so `curConn.js`'s `recordRecentPeer()`
-builds it from every successful connection instead), favorites read+write
-(`load_fav_peers`/`buildPeerRecordsById` for reads, `setByName("fav")` for
-writes - the real `bind.mainStoreFav` contract is a bare `fav` peer-ID
-array, not `option:*`), local→remote clipboard (already worked before
-this audit item was opened - the toolbar's "Send clipboard keystrokes"
-action reads the local clipboard via Flutter's own `Clipboard.getData`
-and sends it through the already-wired `sessionInputString` →
-`setByName("input_string")` path), network settings, Account tab, "this
-desktop" server-settings defaults, UI text (~140 strings via
-`translations.js`, sourced from the engine's own `src/lang/en.rs`),
-remote directory browsing (`read_remote_dir` → `FileAction.read_dir`,
-results routed to `pushEvent("file_dir", ...)`), create/rename/remove file
-(`FileDirCreate`/`FileRename`/`FileRemoveFile`), the local file/folder
-picker (`select_files` → a real browser file/`webkitdirectory` input),
-single-file download and upload (`FileAction.send`/`.receive` +
-`FileResponse.block`/`.done` streaming), cancel transfer job
-(`FileAction.cancel`), terminal open/close/input/resize/output
-(`TerminalAction.open`/`.close`/`.data`/`.resize`, results routed to
-`pushEvent("terminal_response", ...)`), and the remaining small getters -
-peer platform (sourced from the already-stored `PeerInfo`), peer-sent
-`message_box` (routed to `globals.msgbox()`), `envvar` (a plain
-per-browser localStorage KV store per `bridge.dart`'s own comment),
-`build_date`/`conn_session_id`/`last_audit_note` (sensible defaults).
-`resolve_avatar_url`/`local_os` turned out not to need fixing at all on
-inspection - the former's Dart caller already falls back to the input
-avatar string when unhandled, and the latter isn't called from
-`bridge.dart` anywhere. Field names for the file-transfer and terminal
-work were confirmed against both the real `message.proto` (fetched
-directly) and the already-committed legacy v1 `message.ts`
-(`src/utils/webclient/message.ts` - generated by the exact same
+rebuild approach, plus the startup-race fix above), mouse input, remote
+cursor image, keyboard - both Legacy mode (`mapKey()` vendors the real
+`KEY_MAP` table, already generated and checked into `rustdesk-api`'s own
+legacy v1 webclient source at `resources/web/js/src/gen_js_from_hbb.ts` -
+see the correction above) and Map mode (`flutter_key_event` converts
+`usb_hid` to the connected peer's native position code, hand-vendored
+from the real `rdev` crate - `rustdesk-org/rdev`, referenced by
+`Cargo.toml` and the same one `src/keyboard.rs` itself calls into for
+`usb_hid_code_to_win_scancode`/etc; macOS ISO-layout switching isn't
+implemented, a local Rust-side setting with no web equivalent), chat
+(`send_chat`/`chat_message`, missed in the original audit pass
+entirely), quality monitor + toolbar indicator (delay/bitrate/fps/speed/
+codec/chroma), scroll/view style, image quality, custom image quality,
+custom FPS, codec switching, alternative-codecs list,
+show-quality-monitor toggle, virtual display, privacy mode, elevation
+(direct + with-logon), restart, personal/shared address book, groups,
+recent peers (no native history file to read on web, so `curConn.js`'s
+`recordRecentPeer()` builds it from every successful connection
+instead), favorites read+write (`load_fav_peers`/`buildPeerRecordsById`
+for reads, `setByName("fav")` for writes - the real `bind.mainStoreFav`
+contract is a bare `fav` peer-ID array, not `option:*`), local→remote
+clipboard (already worked before this audit item was opened - the
+toolbar's "Send clipboard keystrokes" action reads the local clipboard
+via Flutter's own `Clipboard.getData` and sends it through the
+already-wired `sessionInputString` → `setByName("input_string")` path),
+network settings, Account tab, "this desktop" server-settings defaults,
+UI text (~140 strings via `translations.js`, sourced from the engine's
+own `src/lang/en.rs`), remote directory browsing (`read_remote_dir` →
+`FileAction.read_dir`, results routed to `pushEvent("file_dir", ...)`),
+create/rename/remove file (`FileDirCreate`/`FileRename`/
+`FileRemoveFile`), the local file/folder picker (`select_files` → a real
+browser file/`webkitdirectory` input), single-file download and upload
+(`FileAction.send`/`.receive` + `FileResponse.block`/`.done`
+streaming), cancel transfer job (`FileAction.cancel`), terminal
+open/close/input/resize/output (`TerminalAction.open`/`.close`/`.data`/
+`.resize`, results routed to `pushEvent("terminal_response", ...)`), and
+the remaining small getters - peer platform (sourced from the
+already-stored `PeerInfo`), peer-sent `message_box` (routed to
+`globals.msgbox()`), `envvar` (a plain per-browser localStorage KV store
+per `bridge.dart`'s own comment), `build_date`/`conn_session_id`/
+`last_audit_note` (sensible defaults). `resolve_avatar_url`/`local_os`
+turned out not to need fixing at all on inspection - the former's Dart
+caller already falls back to the input avatar string when unhandled,
+and the latter isn't called from `bridge.dart` anywhere. Field names for
+the file-transfer/terminal/keyboard work were confirmed against real
+upstream sources fetched directly rather than guessed: `message.proto`,
+the already-committed legacy v1 `message.ts` (generated by the same
 `protoc-gen-ts_proto` tool this v2 client's own gitignored `message.ts`
-uses at build time, so its naming conventions are trustworthy ground
-truth without a live connection).
+uses), and (for Map Mode) the `rdev` crate's actual keycode tables.
 
-**Stubbed** (UI present, does nothing): per-session login 2FA, live
-online-status polling (`query_onlines`), language picker (English-only),
-audit notes (`send_note`/`setAuditGuid` - the audit-server URL itself is
-wired), and file transfer's recursive-delete flow
+**Stubbed** (UI present, does nothing): per-session login 2FA
+(`send_2fa` - real, reachable code, not desktop-only; distinct from
+account-level 2FA setup below, which *is* platform ceiling), live
+online-status polling (`query_onlines` - investigated, needs new
+backend work: a real "is this ID online" answer has to come from hbbs,
+and no existing endpoint does that today - `AddressBookFormData.Online`
+in `rustdesk-api`'s Go backend is just the native client's own
+last-known state round-tripped through address-book sync, not a live
+check), audit notes (`send_note`/`setAuditGuid` - the audit-server URL
+itself is wired), and file transfer's recursive-delete flow
 (`remove_all_empty_dirs`/`read_dir_to_remove_recursive` - deliberately
 left alone, see "Missing" below).
 
 **Missing entirely** (falls through to the generic unhandled-case
-warning - no prior stub at all): keyboard Map Mode (`flutter_key_event` -
-deliberately left alone; unlike Legacy mode's KEY_MAP, this needs
-USB-HID→scancode tables for Windows, Linux, *and* macOS, chosen per the
-connected peer's platform, none of which turned up already-vendored
-anywhere in this session's sources - a wrong scancode sends the wrong
-key, not just nothing, so this genuinely needs live-connection testing
-per target OS rather than a guess), file transfer's overwrite
+warning - no prior stub at all): file transfer's overwrite
 confirmation/resume/compression (`confirm_override_file` ties into the
 same digest/skip state machine as `remove_all_empty_dirs` above - both
 plausible `FileAction` mappings for the recursive-delete ops fit the
@@ -720,9 +736,10 @@ a follow-up of its own), directory file transfers (`FileTransferBlock`/
 so multi-file transfers need the client to already know the full ordered
 file listing beforehand - not verifiable without a live connection),
 account-auth (`account_auth`/`account_auth_cancel`/`account_auth_result` -
-worth a live check for reachability given the 2FA-setup platform-ceiling
-item below), per-peer alias/existence/password checks (`option:peer`/
-`peer_exists`/`peer_has_password`), and remove-peer.
+real, reachable code, not desktop-only; worth a live check for whether
+it's actually reachable given the login flow), per-peer alias/existence/
+password checks (`option:peer`/`peer_exists`/`peer_has_password`), and
+remove-peer.
 
 **Platform ceiling** (not a gap - `web/bridge.dart` throws
 `UnimplementedError` directly, or is otherwise inherently unreachable from
@@ -737,13 +754,22 @@ clipboard polling lives in RustDesk's Rust core, never exposed through
 clipboard reads without a user gesture), local directory *browsing* for
 file transfer (`sessionReadLocalDirSync` throws `UnimplementedError`
 directly in `bridge.dart` - a flat file/folder picker, which does work, is
-the real ceiling here).
+the real ceiling here), and the language picker (`mainChangeLanguage`
+throws `UnimplementedError` directly - there's no way to switch
+languages in this recovered engine at all, on any web build; what *is*
+real is that `translate()` already receives the browser's own language
+on every call, so more translations would auto-localize with no picker
+needed - see recommendations below).
 
-Recommended order (impact vs. effort), updated: file transfer's
-recursive-delete/overwrite-confirm/resume/compression/directory-transfer
-remainder → account/peer management (`account_auth`, `option:peer`/
-`peer_exists`/`peer_has_password`, `remove_peer`) → keyboard Map Mode
-(needs live per-OS verification either way, so no rush).
+Recommended order (impact vs. effort), updated: live online-status
+polling (`query_onlines` - needs new backend work, scope it as its own
+small project) → file transfer's recursive-delete/overwrite-confirm/
+resume/compression/directory-transfer remainder → account/peer
+management (`account_auth`, `option:peer`/`peer_exists`/
+`peer_has_password`, `remove_peer`) → more languages (porting more of
+the ~40 real files already sitting in `Chr0mX/rustdesk/src/lang/` into
+`translations.js`, same mechanical process as English - real, bounded,
+low-risk, whenever there's demand).
 
 ### Phase 6 - Cutover
 
