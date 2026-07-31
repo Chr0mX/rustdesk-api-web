@@ -124,15 +124,47 @@ export function initBridge () {
 
   window.setByName = (name, arg) => {
     switch (name) {
-      case 'connect':
+      // bridge.dart never actually calls setByName("connect", ...) - that
+      // was this file's original (wrong) guess at the contract. The real
+      // connect flow (models/model.dart's PeerTabModel session-start path)
+      // is bind.sessionAddSync() immediately followed by bind.sessionStart()
+      // (flutter/lib/web/bridge.dart), which dispatch as "session_add_sync"
+      // (JSON: id/password/is_shared_password/isFileTransfer/isViewCamera/
+      // isTerminal) and "session_start" (JSON: {id}) respectively - neither
+      // was handled here, so every connect attempt silently fell through to
+      // the default/unhandled-case branch and curConn.start() never ran at
+      // all (confirmed live: zero "Connecting to rendezvous server" log
+      // lines despite the user attempting to connect). sessionAddSync's
+      // return value is explicitly ignored by its one real caller for a
+      // fresh connection (model.dart: `// ignore: unused_local_variable`),
+      // so '' is fine here - only sessionAddExistedSync's return is
+      // actually checked, and that one (tab -> window reuse) never reaches
+      // JS at all (flutter/lib/web/bridge.dart's stub returns '' directly,
+      // see line 68-75). Only the default remote-desktop connection type is
+      // implemented (see README.md item 5), so warn rather than silently
+      // ignoring a file-transfer/view-camera/terminal attempt.
+      case 'session_add_sync': {
+        const e = JSON.parse(arg)
+        if (e.isFileTransfer || e.isViewCamera || e.isTerminal) {
+          console.warn('setByName("session_add_sync") - file transfer/view camera/terminal sessions are not implemented, only the default remote desktop connection is supported', arg)
+        }
         curConn = new CurConn()
-        curConn.start(arg)
+        return ''
+      }
+      case 'session_start': {
+        const e = JSON.parse(arg)
+        curConn?.start(e.id)
         break
+      }
       case 'login':
         curConn.handle_login_from_ui(...Object.values(JSON.parse(arg)))
         break
-      case 'close':
-        curConn.close()
+      // Same wrong-guessed-name bug as session_add_sync/session_start above -
+      // bridge.dart's sessionClose (flutter/lib/web/bridge.dart) dispatches
+      // as "session_close", never "close". Unhandled, this meant clicking
+      // disconnect never actually tore down the WebSocket/curConn instance.
+      case 'session_close':
+        curConn?.close()
         break
       case 'refresh':
         curConn.refresh()
