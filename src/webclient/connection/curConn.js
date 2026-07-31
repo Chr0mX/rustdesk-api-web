@@ -535,6 +535,16 @@ export default class CurConn {
     this.sendVideoReceived()
     const tm = new Date().getTime()
     try {
+      // loadVideoDecoder() fires off the Worker spin-up/wasm fetch without
+      // waiting for it (see its own comment), so a fresh connect/reconnect/
+      // switch_display can have video_frame messages arriving well before
+      // the decoder is ready - confirmed live ("decode error: FFmpeg not
+      // loaded", repeated for every frame during that window on a
+      // reconnect). Wait for it here instead of dropping those frames -
+      // dropping them left the decoder missing whatever reference frame
+      // they carried, corrupting the next frame it actually did decode
+      // ("decode error: {}" right after "FFmpeg loaded" in the same log).
+      await this._videoDecoderReady
       for (let i = 0; i < frameCount; i++) {
         const frame = s.frames[i]
         const result = await decodeFrame(codec, frame.data.slice(0).buffer)
@@ -788,13 +798,13 @@ export default class CurConn {
   // Replaces v1's loadVp9()/codec.js (OGV.js-based VP9/Theora, confirmed
   // stale in Phase 1 findings) - the current bundle uses ffmpeg-core.wasm
   // instead (videoDecoder.js), matching the legacy bundle's own decoder.
-  // Fire-and-forget: handleOneVideoFrame's decodeFrame() call will simply
-  // reject (caught, logged) if a video_frame message arrives before this
-  // resolves, rather than blocking the connect flow on a Worker spin-up +
-  // ~1MB wasm fetch.
+  // Doesn't block the connect flow on the Worker spin-up + ~1MB wasm fetch
+  // this kicks off - handleOneVideoFrame awaits _videoDecoderReady itself,
+  // right before it actually needs a decoder, instead of stalling
+  // everything else (rendezvous/relay handshake, login) on it here.
   loadVideoDecoder () {
     closeVideoDecoder()
-    initVideoDecoder().catch((e) => console.error('Failed to load video decoder', e))
+    this._videoDecoderReady = initVideoDecoder().catch((e) => console.error('Failed to load video decoder', e))
   }
 
   // --- Everything below is NOT in v1 - stubs matching the setByName/

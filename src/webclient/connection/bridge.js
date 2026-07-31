@@ -395,8 +395,21 @@ export function initBridge () {
       case 'option:flutter:peer':
         result = curConn?.getFlutterUiOption(arg)
         break
+      // bridge.dart's sessionGetScrollStyle forwards this getByName result
+      // straight into ScrollStyle.fromString(style) whenever it's non-null
+      // (models/model.dart's updateScrollStyle) - and since this file's own
+      // getByName wrapper (see below) always turns an unset option into the
+      // JS string '' rather than actual null, that check never sees the
+      // null it needs to fall back to ScrollStyle.scrollauto.
+      // ScrollStyle.fromString('') has no case for '' and throws
+      // ArgumentError, crashing every onRgba paint callback - confirmed
+      // live ("onRgba error: Invalid argument(s): Unknown ScrollStyle
+      // string value: ''", repeated on every single decoded frame once a
+      // peer without this option ever explicitly set connects). Default it
+      // to the same 'scrollauto' Dart would have used for a real null.
       case 'option:session':
         result = curConn?.getOption(arg)
+        if (arg === 'scroll_style' && !result) result = 'scrollauto'
         break
       case 'option:toggle':
         result = curConn?.getToggleOption(arg)
