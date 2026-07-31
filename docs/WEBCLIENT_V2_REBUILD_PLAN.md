@@ -623,31 +623,40 @@ were found live). This is the deferred pass, done by cross-referencing
 every `setByName`/`getByName` call site across all of `flutter/lib/web/`
 (not just `bridge.dart`) against `bridge.js`'s actual case list, then
 checking each matched case's `curConn.js` implementation for whether it's
-real or a stub. ~60 distinct engine↔shell calls audited: 19 confirmed
-working, 15 wired to an explicit stub (visible in the UI, does nothing),
-19 have no handler at all (silently unhandled), 9 are a hard platform
-ceiling (`web/bridge.dart` itself throws `UnimplementedError` - not
-reachable from any web build, ours or legacy's, so not a parity gap).
+real or a stub. ~60 distinct engine↔shell calls audited, current count:
+29 confirmed working, 7 wired to an explicit stub (visible in the UI,
+does nothing), 17 have no handler at all (silently unhandled), 11 are a
+hard platform ceiling (`web/bridge.dart` itself throws
+`UnimplementedError` - not reachable from any web build, ours or
+legacy's, so not a parity gap). Updated same day as first written -
+audio, the Recents tab, and the whole stubbed-toolbar batch (PRs
+#50-#52) moved from stub/missing to working; see below for what's still
+open. A published audit artifact with the full per-feature breakdown
+exists alongside this doc (not repo-tracked, ask if you need the link
+regenerated).
 
-**Working** (includes several fixed live this session, via PRs #43-#48):
+**Working** (includes many fixed live this session, via PRs #43-#52):
 connect/disconnect lifecycle, reconnect, video decode (all 5 codecs, via
-ffmpeg-core.wasm), mouse input, remote cursor image, keyboard (Legacy
+ffmpeg-core.wasm), audio playback (via libopus.wasm, same reuse-not-
+rebuild approach), mouse input, remote cursor image, keyboard (Legacy
 mode), quality monitor + toolbar indicator (delay/bitrate/fps/speed/codec/
-chroma), scroll/view style, image quality, show-quality-monitor toggle,
-personal/shared address book, groups, network settings, Account tab,
-"this desktop" server-settings defaults, UI text (~140 strings via the
-new `translations.js`, sourced from the engine's own `src/lang/en.rs`).
+chroma), scroll/view style, image quality, custom image quality, custom
+FPS, codec switching, alternative-codecs list, show-quality-monitor
+toggle, virtual display, privacy mode, elevation (direct + with-logon),
+restart, personal/shared address book, groups, recent peers (no native
+history file to read on web, so `curConn.js`'s `recordRecentPeer()`
+builds it from every successful connection instead), network settings,
+Account tab, "this desktop" server-settings defaults, UI text (~140
+strings via `translations.js`, sourced from the engine's own
+`src/lang/en.rs`).
 
-**Stubbed** (UI present, does nothing - `curConn.js`'s own `console.warn`
-stubs, or newly found this pass): custom image quality, custom FPS, codec
-switching, alternative-codecs list, audio playback (`initAudio`/
-`playAudio` in `globals.js` - same shape as the video-decode gap that's
-now fixed, needs libopus.wasm wired up the same way), file
-transfer/browse/cancel-job (already flagged as needing real protocol
-work), virtual display, privacy mode, elevation (direct + with-logon),
-restart, per-session login 2FA, live online-status polling
-(`query_onlines`), language picker (English-only), audit notes
-(`send_note`/`setAuditGuid` - the audit-server URL itself is now wired).
+**Stubbed** (UI present, does nothing): file transfer/browse/cancel-job
+(already flagged as needing real protocol work), per-session login 2FA,
+live online-status polling (`query_onlines`), language picker
+(English-only), audit notes (`send_note`/`setAuditGuid` - the
+audit-server URL itself is wired), favorites (`load_fav_peers` now reads
+real, if empty, storage instead of being unhandled, but nothing writes to
+it yet - "Add to Favorites" itself isn't wired anywhere).
 
 **Missing entirely** (falls through to the generic unhandled-case
 warning - no prior stub at all): keyboard Map Mode (`flutter_key_event` -
@@ -661,13 +670,12 @@ the whole feature area), file management (`select_files`/`create_dir`/
 `read_dir_to_remove_recursive`/`confirm_override_file`), account-auth
 (`account_auth`/`account_auth_cancel`/`account_auth_result` - worth a
 live check for reachability given the 2FA-setup platform-ceiling item
-below), recent peers, favorite peers, per-peer alias/existence/password
-checks (`option:peer`/`peer_exists`/`peer_has_password`), remove-peer,
-peer-sent message boxes (the wire-level `message_box` field - distinct
-from this client's own internally-generated msgbox calls, which do
-work), and several low-traffic info getters (`envvar`, `build_date`,
-`conn_session_id`, `last_audit_note`, `platform`, `resolve_avatar_url`,
-`local_os`, `fav`).
+below), per-peer alias/existence/password checks (`option:peer`/
+`peer_exists`/`peer_has_password`), remove-peer, peer-sent message boxes
+(the wire-level `message_box` field - distinct from this client's own
+internally-generated msgbox calls, which do work), and several
+low-traffic info getters (`envvar`, `build_date`, `conn_session_id`,
+`last_audit_note`, `platform`, `resolve_avatar_url`, `local_os`, `fav`).
 
 **Platform ceiling** (not a gap - `web/bridge.dart` throws
 `UnimplementedError` directly): LAN discovery, RDP tunneling, acting as a
@@ -677,11 +685,9 @@ system, native installer flows, account-level 2FA setup (`mainGenerate2Fa`/
 above, which *is* reachable), native trackpad-speed tuning, native
 screenshot capture.
 
-Recommended order (impact vs. effort): audio playback → recent/favorite
-peer lists → hide-or-implement the currently-stubbed toolbar controls
-(they currently look fully functional and silently aren't) → local→remote
-clipboard → file transfer → terminal → keyboard Map Mode → remaining small
-getters.
+Recommended order (impact vs. effort), updated: "Add to Favorites" writer
+→ local→remote clipboard → file transfer → terminal → keyboard Map Mode →
+remaining small getters.
 
 ### Phase 6 - Cutover
 
