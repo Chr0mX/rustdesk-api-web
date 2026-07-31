@@ -17,6 +17,7 @@ import * as rendezvous from './rendezvous'
 import * as sha256 from 'fast-sha256'
 import * as globals from './globals'
 import { mapKey, sleep } from './common'
+import { initVideoDecoder, decodeFrame, closeVideoDecoder } from './videoDecoder'
 
 // v1's own URI construction (SCHEMA='ws://' always, plus a flat PORT+offset
 // for every host) is NOT what the currently-deployed legacy webclient
@@ -391,7 +392,7 @@ export default class CurConn {
     this._msgs = []
     clearInterval(this._interval)
     this._ws?.close()
-    this._videoDecoder?.close()
+    closeVideoDecoder()
   }
 
   refresh () {
@@ -478,35 +479,79 @@ export default class CurConn {
     this._ws?.sendMessage({ misc })
   }
 
-  // Adapted for Phase 1's codec decision (reuse ffmpeg-core.wasm, not
-  // v1's OGV.js-based vp9s decode) and Phase 3's onRgba contract (draw()
-  // now forwards to the Flutter engine instead of painting locally) - see
-  // README.md. The actual ffmpeg-core.wasm wiring isn't implemented yet;
-  // this preserves v1's control flow (per-frame decode callback, video-
-  // received ack, fps tracking) so it's a small diff once that lands.
+  // ffmpeg-core.wasm's own build expects this exact integer per codec -
+  // confirmed against the legacy bundle's own dispatch (resources/web/js/
+  // dist/index.js), not guessed, since we're reusing that same compiled
+  // .wasm binary (see videoDecoder.js) rather than rebuilding it.
+  getCodecType (vf) {
+    if (vf.vp8s) return [0, vf.vp8s]
+    if (vf.vp9s) return [1, vf.vp9s]
+    if (vf.av1s) return [2, vf.av1s]
+    if (vf.h264s) return [3, vf.h264s]
+    if (vf.h265s) return [4, vf.h265s]
+    return [undefined, undefined]
+  }
+
+  // Queued rather than decoded inline: ffmpeg-core.wasm runs in a single
+  // Worker and must see frames in order (later frames can reference earlier
+  // ones), so a second video_frame message arriving mid-decode has to wait
+  // its turn rather than racing the first through decodeFrame().
   handleVideoFrame (vf) {
     if (!this._firstFrame) {
       globals.msgbox('', '', '')
       this._firstFrame = true
     }
-    if (!this._videoDecoder) {
-      console.warn('handleVideoFrame: no video decoder loaded yet (see loadVideoDecoder)')
+    this._videoQueue = this._videoQueue || []
+    this._videoQueue.push(vf)
+    if (!this._decodingVideo) this.processVideoQueue()
+  }
+
+  async processVideoQueue () {
+    this._decodingVideo = true
+    try {
+      while (this._videoQueue.length > 0) {
+        await this.handleOneVideoFrame(this._videoQueue.shift())
+      }
+    } catch (e) {
+      console.error('deal video queue failed', e)
+    }
+    this._decodingVideo = false
+  }
+
+  // Matches the legacy bundle's own handleOneVideoFrame exactly: a
+  // video_frame message can carry several encoded frames at once (codec
+  // frame batching) - all of them have to be fed through the decoder in
+  // order to keep its reference-frame state correct, but only the last
+  // one in the batch is actually worth painting (drawing the earlier ones
+  // too would just mean immediately-superseded frames flash by, wasting
+  // paint work for no visible benefit).
+  async handleOneVideoFrame (vf) {
+    const [codec, s] = this.getCodecType(vf)
+    if (codec === undefined) {
+      console.log('unknown codec')
       return
     }
-    const dec = this._videoDecoder
+    const frameCount = s.frames?.length || 0
+    this.sendVideoReceived()
     const tm = new Date().getTime()
-    dec.decode(vf, (display, rgba) => {
-      this.sendVideoReceived()
-      globals.draw(display, rgba)
-      const now = new Date().getTime()
-      const elapsed = now - tm
-      this._videoTestSpeed[1] += elapsed
-      this._videoTestSpeed[0] += 1
-      if (this._videoTestSpeed[0] >= 30) {
-        console.log('video decoder: ' + parseInt('' + this._videoTestSpeed[1] / this._videoTestSpeed[0]))
-        this._videoTestSpeed = [0, 0]
+    try {
+      for (let i = 0; i < frameCount; i++) {
+        const frame = s.frames[i]
+        const result = await decodeFrame(codec, frame.data.slice(0).buffer)
+        if (result?.data && i === frameCount - 1) {
+          globals.draw(vf.display, new Uint8Array(result.data.data))
+          const elapsed = new Date().getTime() - tm
+          this._videoTestSpeed[1] += elapsed
+          this._videoTestSpeed[0] += 1
+          if (this._videoTestSpeed[0] >= 30) {
+            console.log('video decoder: ' + parseInt('' + this._videoTestSpeed[1] / this._videoTestSpeed[0]))
+            this._videoTestSpeed = [0, 0]
+          }
+        }
       }
-    })
+    } catch (e) {
+      console.error('decode error: ', e)
+    }
   }
 
   handlePeerInfo (pi) {
@@ -741,11 +786,15 @@ export default class CurConn {
   }
 
   // Replaces v1's loadVp9()/codec.js (OGV.js-based VP9/Theora, confirmed
-  // stale in Phase 1 findings) - the current bundle uses ffmpeg-core.wasm/
-  // libopus.wasm instead, decided but not yet wired up here.
+  // stale in Phase 1 findings) - the current bundle uses ffmpeg-core.wasm
+  // instead (videoDecoder.js), matching the legacy bundle's own decoder.
+  // Fire-and-forget: handleOneVideoFrame's decodeFrame() call will simply
+  // reject (caught, logged) if a video_frame message arrives before this
+  // resolves, rather than blocking the connect flow on a Worker spin-up +
+  // ~1MB wasm fetch.
   loadVideoDecoder () {
-    this._videoDecoder?.close()
-    console.warn('loadVideoDecoder(): ffmpeg-core.wasm wiring not implemented yet (see Phase 1 findings\' codec decision)')
+    closeVideoDecoder()
+    initVideoDecoder().catch((e) => console.error('Failed to load video decoder', e))
   }
 
   // --- Everything below is NOT in v1 - stubs matching the setByName/

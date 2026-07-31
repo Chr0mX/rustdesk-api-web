@@ -36,11 +36,36 @@ export function isDesktop () {
   return !window.isMobile()
 }
 
+// Dart's own event handlers (models/model.dart's startEventListener and
+// everything it calls - handleMsgBox, handleCursorData, etc.) read most
+// evt[key] values as plain strings compared directly against string
+// literals (`evt['type'] == 'error'`, `evt['secure'] == 'true'`), matching
+// how the native client's Rust side serializes event payloads as
+// HashMap<String, String> - every value pre-stringified once, not a nested
+// JSON document. A *non*-string value (bool/number/array/object) still
+// needs JSON.stringify to reach that same convention (`JSON.stringify(true)`
+// -> the 4-char string "true", matching `evt['secure'] == 'true'`; a
+// List/Map value -> a JSON string Dart re-decodes itself, e.g.
+// handleSyncPeerInfo's `json.decode(evt['displays'])`) - but a value that's
+// *already* a JS string must NOT also be run through JSON.stringify, since
+// that wraps it in an extra pair of literal `"` characters
+// (`JSON.stringify('error')` -> the 7-char string `"error"`, not `error`),
+// which silently fails every `==` comparison against it. Confirmed live:
+// this broke every msgbox call already made through this function -
+// `evt['type'] == 'error'` etc. never matched, so every msgbox event fell
+// through handleMsgBox's generic `else` branch (see msgbox()'s own comment
+// below for why that branch was also crashing outright).
 function jsonfyForDart (payload) {
   const tmp = {}
   for (const [key, value] of Object.entries(payload || {})) {
     if (!key) continue
-    tmp[key] = value instanceof Uint8Array ? '[' + value.toString() + ']' : JSON.stringify(value)
+    if (value instanceof Uint8Array) {
+      tmp[key] = '[' + value.toString() + ']'
+    } else if (typeof value === 'string') {
+      tmp[key] = value
+    } else {
+      tmp[key] = JSON.stringify(value)
+    }
   }
   return tmp
 }
@@ -57,14 +82,27 @@ export function pushEvent (name, payload) {
   window.onGlobalEvent(JSON.stringify({ name, ...jsonfyForDart(payload) }))
 }
 
-export function msgbox (type, title, text) {
+export function msgbox (type, title, text, link = '') {
   if (!type || (type === 'error' && !text)) return
   // v1 also computed a "hasRetry" flag here via checkIfRetry(), sourced
   // from gen_js_from_hbb.ts (generated from the actual rustdesk client's
   // src/client.rs constants - see the plan doc's "Why this is tractable"
   // section for why that generator was deliberately not carried over).
   // Dropped for now; add back if the engine actually needs it.
-  pushEvent('msgbox', { type, title, text })
+  //
+  // `link` is required even when there's nothing to link to: handleMsgBox
+  // (models/model.dart) reads `evt['link']` unconditionally, and its
+  // generic fallback branch (any type that isn't one of ~15 specifically
+  // named ones - "error" included, so every globals.msgbox('error', ...)
+  // call in curConn.js hits this) passes it straight into showMsgBox's
+  // non-nullable `String link` parameter. Omitting it meant `evt['link']`
+  // was `null`, which crashed Dart outright ("type 'Null' is not a subtype
+  // of type 'String'") before any dialog could render - confirmed live via
+  // a stray "main.dart.js:... Uncaught" console line immediately after
+  // "Got relay response" on every offline/error connect attempt, which is
+  // also why the UI just sat there black instead of showing "Remote
+  // desktop is offline" or any other error.
+  pushEvent('msgbox', { type, title, text, link })
 }
 
 // Forwards decoded video frames to the Flutter engine's window.onRgba, if
