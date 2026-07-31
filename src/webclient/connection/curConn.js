@@ -20,6 +20,19 @@ import { mapKey, sleep } from './common'
 import { initVideoDecoder, decodeFrame, closeVideoDecoder } from './videoDecoder'
 import { closeAudio } from './audioDecoder'
 
+// TerminalModel._handleTerminalData (models/terminal_model.dart) expects
+// "data" as a base64 string ("Try to decode as base64 first") - chunked to
+// avoid a call-stack blowup on String.fromCharCode(...bytes) for larger
+// terminal output bursts.
+function bytesToBase64 (bytes) {
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
 // v1's own URI construction (SCHEMA='ws://' always, plus a flat PORT+offset
 // for every host) is NOT what the currently-deployed legacy webclient
 // bundle (resources/web/js/dist/index.js) actually does - decompiled and
@@ -410,6 +423,8 @@ export default class CurConn {
         globals.playAudio(msg?.audio_frame.data)
       } else if (msg?.file_response) {
         await this.handleFileResponse(msg?.file_response)
+      } else if (msg?.terminal_response) {
+        await this.handleTerminalResponse(msg?.terminal_response)
       }
     }
   }
@@ -1402,6 +1417,91 @@ export default class CurConn {
     this._downloads.delete(id)
     const cancel = message.FileTransferCancel.fromPartial({ id })
     this._ws?.sendMessage({ file_action: message.FileAction.fromPartial({ cancel }) })
+  }
+
+  // Terminal - TerminalAction/TerminalResponse, confirmed against the real
+  // message.proto ("Terminal messages - standalone feature like
+  // FileAction" per its own comment there) and against
+  // models/terminal_model.dart's handleTerminalResponse, which explicitly
+  // branches on string vs int fields with a comment noting "Web sends
+  // terminal_id as a string" - i.e. this exact JSON-over-pushEvent shape is
+  // something the recovered engine already anticipated for a web build.
+  openTerminal (value) {
+    try {
+      const e = JSON.parse(value)
+      const open = message.OpenTerminal.fromPartial({ terminal_id: e.terminal_id, rows: e.rows, cols: e.cols })
+      this._ws?.sendMessage({ terminal_action: message.TerminalAction.fromPartial({ open }) })
+    } catch (err) {
+      console.error('Failed to open terminal: ' + err.message)
+    }
+  }
+
+  sendTerminalInput (value) {
+    try {
+      const e = JSON.parse(value)
+      const data = new TextEncoder().encode(e.data)
+      const term_data = message.TerminalData.fromPartial({ terminal_id: e.terminal_id, data, compressed: false })
+      this._ws?.sendMessage({ terminal_action: message.TerminalAction.fromPartial({ data: term_data }) })
+    } catch (err) {
+      console.error('Failed to send terminal input: ' + err.message)
+    }
+  }
+
+  resizeTerminal (value) {
+    try {
+      const e = JSON.parse(value)
+      const resize = message.ResizeTerminal.fromPartial({ terminal_id: e.terminal_id, rows: e.rows, cols: e.cols })
+      this._ws?.sendMessage({ terminal_action: message.TerminalAction.fromPartial({ resize }) })
+    } catch (err) {
+      console.error('Failed to resize terminal: ' + err.message)
+    }
+  }
+
+  closeTerminal (value) {
+    try {
+      const e = JSON.parse(value)
+      const close = message.CloseTerminal.fromPartial({ terminal_id: e.terminal_id })
+      this._ws?.sendMessage({ terminal_action: message.TerminalAction.fromPartial({ close }) })
+    } catch (err) {
+      console.error('Failed to close terminal: ' + err.message)
+    }
+  }
+
+  async handleTerminalResponse (tr) {
+    if (tr.opened) {
+      const o = tr.opened
+      globals.pushEvent('terminal_response', {
+        type: 'opened',
+        terminal_id: String(o.terminal_id),
+        success: String(!!o.success),
+        message: o.message || '',
+        service_id: o.service_id || '',
+        persistent_sessions: o.persistent_sessions || [],
+        replay_terminal_output: !!o.replay_terminal_output,
+      })
+    } else if (tr.data) {
+      let bytes = tr.data.data
+      if (tr.data.compressed) {
+        const { decompress } = await import('./common')
+        const d = await decompress(bytes)
+        if (!d) {
+          console.warn('Dropping compressed terminal output - zstd decoder not wired up yet, see common.js')
+          return
+        }
+        bytes = d
+      }
+      globals.pushEvent('terminal_response', {
+        type: 'data',
+        terminal_id: String(tr.data.terminal_id),
+        data: bytesToBase64(bytes),
+      })
+    } else if (tr.closed) {
+      const c = tr.closed
+      globals.pushEvent('terminal_response', { type: 'closed', terminal_id: String(c.terminal_id), exit_code: String(c.exit_code) })
+    } else if (tr.error) {
+      const e = tr.error
+      globals.pushEvent('terminal_response', { type: 'error', terminal_id: String(e.terminal_id), message: e.message })
+    }
   }
 
   restart () {

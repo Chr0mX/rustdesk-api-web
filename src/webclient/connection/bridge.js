@@ -481,6 +481,18 @@ export function initBridge () {
       case 'select_files':
         curConn?.selectFiles(arg)
         break
+      case 'open_terminal':
+        curConn?.openTerminal(arg)
+        break
+      case 'send_terminal_input':
+        curConn?.sendTerminalInput(arg)
+        break
+      case 'resize_terminal':
+        curConn?.resizeTerminal(arg)
+        break
+      case 'close_terminal':
+        curConn?.closeTerminal(arg)
+        break
       case 'save_ab':
         localStorage.setItem('ab_cache', arg)
         break
