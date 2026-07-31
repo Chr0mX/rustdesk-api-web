@@ -59,8 +59,8 @@
   // generated index.html, which we never load - we load main.dart.js
   // straight into THIS page (webclient.html), which has no <base> tag
   // of its own, so it defaulted to this page's own directory
-  // (/webclient-dev/) instead of where the engine files actually live
-  // (/webclient-dev/engine/), 404ing on every asset. Setting <base>
+  // (/webclient/) instead of where the engine files actually live
+  // (/webclient/engine/), 404ing on every asset. Setting <base>
   // ourselves, right before loading the engine, is the actual fix -
   // removed again on logout so it doesn't affect Login.vue's own
   // relative resource resolution afterward.

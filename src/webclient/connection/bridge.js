@@ -265,6 +265,29 @@ export function initBridge () {
       case 'api_server':
         result = getApiServer()
         break
+      // bridge.dart's mainGetOptionsSync ("options", bare/plural - not to
+      // be confused with "option:local"/"option:session"/etc above) is
+      // what backs the engine's own Settings -> Network panel (id-server/
+      // relay-server display). Ported faithfully from the legacy bundle's
+      // own getByName dispatcher (resources/web/js/dist/index.js): a
+      // JSON blob of whichever of custom-rendezvous-server/relay-server/
+      // api-server/key are actually set, omitting the rest - unhandled
+      // here meant '', and Dart's JSON.decode('') threw ("Invalid server
+      // config: FormatException: ... Unexpected end of JSON input"),
+      // confirmed live, leaving the panel blank. Reads plain (unprefixed)
+      // keys, matching this file's/curConn.js's own established
+      // convention (not the legacy bundle's own "wc-" prefixed storage
+      // wrapper, which is specific to its own vendored JS Settings UI).
+      case 'options': {
+        const keys = ['custom-rendezvous-server', 'relay-server', 'api-server', 'key']
+        const opts = {}
+        keys.forEach((k) => {
+          const v = localStorage.getItem(k)
+          if (v) opts[k] = v
+        })
+        result = JSON.stringify(opts)
+        break
+      }
       case 'option:local':
         result = getLocalOption(arg)
         break
