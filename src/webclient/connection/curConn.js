@@ -639,6 +639,7 @@ export default class CurConn {
     }
     globals.msgbox('success', 'Successful', 'Connected, waiting for image...')
     globals.pushEvent('peer_info', pi)
+    this.recordRecentPeer(pi)
     const p = this.shouldAutoLogin()
     if (p) this.inputOsPassword(p)
     const username = this.getOption('info')?.username
@@ -655,6 +656,45 @@ export default class CurConn {
     } else {
       this.setOption('password', undefined)
     }
+  }
+
+  // Backs the Recents tab (models/peer_model.dart's Peers class, name:
+  // "recent" - see bridge.js's "load_recent_peers" getByName case). A
+  // webclient has no native connection-history file to read the way a
+  // desktop client does, so this is the closest equivalent: record every
+  // peer actually connected to (most-recent-first, deduped by id), the
+  // same way v1 never did but the legacy bundle's own "wc-" prefixed
+  // recent-peers storage does. Peer.fromJson (peer_model.dart) is the
+  // exact field shape expected - matches ab_cache's own peer records,
+  // just without the address-book-specific hash/tags/rdp fields we don't
+  // have data for from a live connection alone.
+  recordRecentPeer (pi) {
+    const entry = {
+      id: this._id,
+      hash: '',
+      password: '',
+      username: pi.username || '',
+      hostname: pi.hostname || '',
+      platform: pi.platform || '',
+      alias: '',
+      tags: [],
+      forceAlwaysRelay: 'false',
+      rdpPort: '',
+      rdpUsername: '',
+      loginName: '',
+      device_group_name: '',
+      note: '',
+    }
+    let recents
+    try {
+      recents = JSON.parse(localStorage.getItem('recent_peers_cache') || '[]')
+    } catch (e) {
+      recents = []
+    }
+    recents = recents.filter((p) => p.id !== this._id)
+    recents.unshift(entry)
+    if (recents.length > 100) recents.length = 100
+    localStorage.setItem('recent_peers_cache', JSON.stringify(recents))
   }
 
   shouldAutoLogin () {
