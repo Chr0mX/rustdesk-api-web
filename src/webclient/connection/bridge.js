@@ -122,6 +122,60 @@ function setMainOption (key, value) {
   }
 }
 
+// bridge.dart's mainGetFav/mainStoreFav - the bare getByName/setByName
+// "fav" case (distinct from "load_fav_peers") is what "Add to Favorites"
+// actually calls (confirmed in common/widgets/peer_card.dart:
+// bind.mainGetFav() -> add/remove the id -> bind.mainStoreFav(favs)), and
+// it's just a JSON array of peer ID strings, not full peer records - the
+// full records "load_fav_peers" needs for display are looked up
+// separately (see buildPeerRecordsById below).
+function getFavIds () {
+  try {
+    return JSON.parse(localStorage.getItem('fav_ids') || '[]')
+  } catch (e) {
+    return []
+  }
+}
+function setFavIds (ids) {
+  localStorage.setItem('fav_ids', JSON.stringify(ids))
+}
+
+// Resolves a list of peer IDs into Peer.fromJson-shaped records for
+// display (the "load_fav_peers"/"load_recent_peers" pushEvent payload) by
+// looking them up in recent_peers_cache - the one place this file already
+// keeps full records (curConn.js's recordRecentPeer(), written on every
+// successful connect). A favorited peer never connected to yet (added
+// straight from the address book, say) won't have an entry there, so
+// falls back to an otherwise-empty record carrying just the id - Dart
+// still renders a card, just without username/hostname until it connects
+// once.
+function buildPeerRecordsById (ids) {
+  let recents = []
+  try {
+    recents = JSON.parse(localStorage.getItem('recent_peers_cache') || '[]')
+  } catch (e) {
+    recents = []
+  }
+  const byId = {}
+  for (const p of recents) byId[p.id] = p
+  return ids.map((id) => byId[id] || {
+    id,
+    hash: '',
+    password: '',
+    username: '',
+    hostname: '',
+    platform: '',
+    alias: '',
+    tags: [],
+    forceAlwaysRelay: 'false',
+    rdpPort: '',
+    rdpUsername: '',
+    loginName: '',
+    device_group_name: '',
+    note: '',
+  })
+}
+
 // bridge.dart's mainLoadAb/mainLoadGroup are NOT getByName pulls - they
 // register a completer under window.onLoadAbFinished/onLoadGroupFinished
 // (with a 2s timeout) and THEN call setByName("load_ab"/"load_group") with
@@ -338,6 +392,20 @@ export function initBridge () {
         setMainOption(e.name, e.value)
         break
       }
+      // common/widgets/peer_card.dart's "Add to Favorites" action calls
+      // bind.mainStoreFav(favs: favs) with the FULL updated favorites list
+      // (bind.mainGetFav() mutated locally), which is bare
+      // setByName("fav", jsonEncode(favs)) in flutter/lib/web/bridge.dart -
+      // NOT option:*, and a plain JSON array of peer ID strings, not full
+      // Peer records (those are resolved separately via buildPeerRecordsById
+      // for the load_fav_peers getByName case above).
+      case 'fav':
+        try {
+          setFavIds(JSON.parse(arg))
+        } catch (e) {
+          console.error('Failed to save favorites: ' + e.message)
+        }
+        break
       case 'option:local': {
         const e = JSON.parse(arg)
         setLocalOption(e.name, e.value)
@@ -666,10 +734,7 @@ export function initBridge () {
       // {peers: <JSON-encoded array of Peer.fromJson-shaped objects>} -
       // confirmed by reading Peers._updatePeers/Peer.fromJson directly,
       // not guessed. curConn.js's recordRecentPeer() is what actually
-      // populates recent_peers_cache, on every successful connection;
-      // favorites has no writer yet (see docs/WEBCLIENT_V2_REBUILD_PLAN.md's
-      // Phase 5 findings - "Add to Favorites" itself isn't wired), so
-      // fav_peers_cache reads back empty until that's added.
+      // populates recent_peers_cache, on every successful connection.
       case 'load_recent_peers':
         globals.pushEvent('load_recent_peers', { peers: localStorage.getItem('recent_peers_cache') || '[]' })
         result = ''
@@ -678,8 +743,11 @@ export function initBridge () {
         result = localStorage.getItem('recent_peers_cache') || '[]'
         break
       case 'load_fav_peers':
-        globals.pushEvent('load_fav_peers', { peers: localStorage.getItem('fav_peers_cache') || '[]' })
+        globals.pushEvent('load_fav_peers', { peers: JSON.stringify(buildPeerRecordsById(getFavIds())) })
         result = ''
+        break
+      case 'fav':
+        result = JSON.stringify(getFavIds())
         break
       default:
         console.warn(`getByName("${name}") - unhandled case`, arg)
