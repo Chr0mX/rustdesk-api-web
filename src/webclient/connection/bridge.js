@@ -69,6 +69,36 @@ function setFlutterLocalOption (key, value) {
   }
 }
 
+// bridge.dart's mainLoadAb/mainLoadGroup are NOT getByName pulls - they
+// register a completer under window.onLoadAbFinished/onLoadGroupFinished
+// (with a 2s timeout) and THEN call setByName("load_ab"/"load_group") with
+// no argument, expecting us to call that completer back asynchronously
+// with the cached JSON once we have it. Previously entirely unhandled, so
+// Dart's own 2s timeout always fired and resolved the Future with the
+// literal string "Timeout" - confirmed live ("load ab cache:
+// FormatException: SyntaxError: Unexpected token 'T', "Timeout" is not
+// valid JSON", since whatever called mainLoadAb() then tried to
+// JSON-decode that placeholder). Ported the legacy bundle's own contract
+// (resources/web/js/dist/index.js's vs()/xs()/Ka()/$o()): call the
+// *Finished callback synchronously with either the cached entry or a
+// default empty structure - Dart expects a String either way, never an
+// error, so there's no real "not found" case to signal. Deliberately NOT
+// porting the legacy bundle's own encryption of this cache (Wa()/qa()) -
+// this cache isn't shared with that bundle's storage at all (different
+// keys entirely), so there's nothing to interoperate with, and Dart's own
+// httpClient/api-token gate already protects the actual data in transit.
+function loadCachedEntries (storageKey, emptyDefault, finishedCallbackName) {
+  let result
+  try {
+    result = localStorage.getItem(storageKey) || JSON.stringify(emptyDefault)
+  } catch (e) {
+    result = ''
+  }
+  if (typeof window[finishedCallbackName] === 'function') {
+    window[finishedCallbackName](result)
+  }
+}
+
 export function initBridge () {
   curConn = new CurConn()
   testDelay()
@@ -213,6 +243,39 @@ export function initBridge () {
       case 'cancel_job':
         curConn?.cancelJob(arg)
         break
+      case 'save_ab':
+        localStorage.setItem('ab_cache', arg)
+        break
+      case 'clear_ab':
+        localStorage.removeItem('ab_cache')
+        break
+      case 'load_ab':
+        loadCachedEntries('ab_cache', { access_token: '', ab_entries: [] }, 'onLoadAbFinished')
+        break
+      case 'save_group':
+        localStorage.setItem('group_cache', arg)
+        break
+      case 'clear_group':
+        localStorage.removeItem('group_cache')
+        break
+      case 'load_group':
+        loadCachedEntries('group_cache', { access_token: '', users: [], peers: [] }, 'onLoadGroupFinished')
+        break
+      // bridge.dart's queryOnlines() asks the rendezvous server whether a
+      // batch of peer IDs are currently online, expecting the result back
+      // via a pushEvent("callback_query_onlines", {onlines, offlines})
+      // (comma-separated ID strings - see models/peer_model.dart's
+      // _updateOnlineState). That's a real rendezvous-protocol round trip
+      // (an online-status request message), not just missing plumbing -
+      // no different in kind from curConn.js's other new-protocol stubs
+      // (file transfer, terminal, 2FA - see its own README.md item 5).
+      // Silently doing nothing here just means peers show their
+      // last-known/offline state instead of live online status - visible
+      // but not broken, unlike the ab/group cases above which were
+      // actively throwing.
+      case 'query_onlines':
+        console.warn('setByName("query_onlines") not implemented - see bridge.js', arg)
+        break
       default:
         console.warn(`setByName("${name}") - unhandled case`, arg)
     }
@@ -314,6 +377,38 @@ export function initBridge () {
         break
       case 'alternative_codecs':
         result = curConn?.getAlternativeCodecs()
+        break
+      // bridge.dart's mainGetMyId (models/server_model.dart's fetchID())
+      // is "this machine's own RustDesk ID", displayed in Settings ->
+      // This Desktop when acting as a server others connect TO. A
+      // webclient never registers with hbbs as a connectable server at
+      // all - there genuinely is no ID here, so '' is the correct answer,
+      // not a missing one.
+      case 'my_id':
+        result = ''
+        break
+      // bridge.dart's mainGetUuid backs the same device-identification
+      // pair as my_id above, sent as part of LoginRequest when logging
+      // into the engine's own internal Account tab (common/widgets/
+      // login.dart) - this webclient's own outer login (api/user.js's
+      // login()) already sends uuid: '' the same way, and the Account
+      // tab bridge fix (option:local) means that internal login form
+      // should rarely even be reached once already authed.
+      case 'uuid':
+        result = ''
+        break
+      // bridge.dart's mainGetVersion - just a display string (e.g. an
+      // "About" panel), not used for any compatibility/protocol check on
+      // this path.
+      case 'version':
+        result = '1.4.9'
+        break
+      // bridge.dart's mainGetLangs backs the language picker in Settings.
+      // No i18n dictionary has been ported here yet (see the 'translate'
+      // case above) - "en" is the only language actually supported right
+      // now, so that's the only one the picker should offer.
+      case 'langs':
+        result = JSON.stringify([['en', 'English']])
         break
       default:
         console.warn(`getByName("${name}") - unhandled case`, arg)
