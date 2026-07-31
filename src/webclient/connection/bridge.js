@@ -14,6 +14,35 @@
 import CurConn, { testDelay, getApiServer } from './curConn'
 import translations from './translations'
 
+// getByName("get_version_number")'s encoding - ported verbatim from the
+// legacy bundle's own K() (resources/web/js/dist/index.js). Not a standard
+// semver-to-int scheme: every dotted component before the last is
+// accumulated base-1000, but the last one is scaled by 10 instead (then a
+// trailing "-N" build suffix, if present, is added on top of that) -
+// deliberately kept exactly as found rather than "fixed" into a cleaner
+// encoding, since callers compare this against the same function's output
+// for other versions, not against some independently-documented format.
+function parseVersionNumber (v) {
+  try {
+    const parts = v.split('-')
+    let i = 0
+    let n = 0
+    if (parts.length > 0) {
+      for (const a of parts[0].split('.')) {
+        n = parseInt(a) || 0
+        i = i * 1000 + n
+      }
+      i -= n
+      i += n * 10
+    }
+    if (parts.length > 1) i += parseInt(parts[1]) || 0
+    return i
+  } catch (e) {
+    console.error(`Failed to parse version number: "${v}" ${e.message}`)
+    return 0
+  }
+}
+
 let curConn
 
 // bridge.dart's mainGetLocalOption/mainSetLocalOption ("option:local"),
@@ -67,6 +96,29 @@ function setFlutterLocalOption (key, value) {
     localStorage.removeItem('option:flutter:local:' + key)
   } else {
     localStorage.setItem('option:flutter:local:' + key, value)
+  }
+}
+// bridge.dart's mainGetOptionSync/mainSetOption - bare getByName/setByName
+// "option" (distinct from "option:local"/"option:session"/etc above), the
+// generic local-config store Rust's own Config::get_option/set_option
+// backs on native platforms (Settings -> "This Desktop"/acting-as-server
+// options: verification-method, temporary-password-length, approve-mode,
+// allow-numeric-one-time-password, stop-service, and others in the same
+// family). Entirely unhandled before, spamming the console on every one
+// of ServerModel's periodic polls. A webclient never acts as a server -
+// there's no host-side daemon here for these to actually configure - but
+// they still need *a* backing store rather than an unhandled-case warning
+// every poll; own namespaced prefix (like option:user:default/
+// option:flutter:local above) so it can't collide with option:local's own
+// plain keys.
+function getMainOption (key) {
+  return localStorage.getItem('option:main:' + key) || ''
+}
+function setMainOption (key, value) {
+  if (value === undefined || value === null) {
+    localStorage.removeItem('option:main:' + key)
+  } else {
+    localStorage.setItem('option:main:' + key, value)
   }
 }
 
@@ -281,6 +333,11 @@ export function initBridge () {
       case 'send_2fa':
         curConn?.send2fa(arg)
         break
+      case 'option': {
+        const e = JSON.parse(arg)
+        setMainOption(e.name, e.value)
+        break
+      }
       case 'option:local': {
         const e = JSON.parse(arg)
         setLocalOption(e.name, e.value)
@@ -377,6 +434,22 @@ export function initBridge () {
       case 'query_onlines':
         console.warn('setByName("query_onlines") not implemented - see bridge.js', arg)
         break
+      // models/input_model.dart's newKeyboardMode -> sessionHandleFlutterKeyEvent,
+      // used when the session's keyboard mode is "map" (Settings ->
+      // Keyboard) rather than the "legacy" default that input_key (already
+      // wired) handles. Encoding a raw USB HID code into the right
+      // KeyEvent protobuf needs the full USB-HID-to-RustDesk-keycode table
+      // (hundreds of entries) plus per-platform lock-modifier handling
+      // (resources/web/js/dist/index.js's yr()/kr/be()/Qa()) - the same
+      // class of "needs a hand-copied generated table, not a quick port"
+      // gap as the input_key path's own mapKey()/KEY_MAP (see this
+      // directory's README.md item 4), just for the alternate keyboard
+      // mode. Left as an explicit stub rather than a guessed/partial
+      // mapping, which would silently send wrong keys instead of just
+      // dropping them.
+      case 'flutter_key_event':
+        console.warn('setByName("flutter_key_event") not implemented - see bridge.js (Settings > Keyboard > Map Mode is not supported; use Legacy mode)', arg)
+        break
       default:
         console.warn(`setByName("${name}") - unhandled case`, arg)
     }
@@ -451,6 +524,67 @@ export function initBridge () {
         result = JSON.stringify(opts)
         break
       }
+      case 'option':
+        result = getMainOption(arg)
+        break
+      // bridge.dart's mainIsUsingPublicServer - whether the currently
+      // configured id/relay server is RustDesk's own public infrastructure
+      // (rs-ny/rs-sg/etc, used as a fallback when nothing else is
+      // configured) rather than a self-hosted one. Ported the legacy
+      // bundle's own check exactly (!localStorage["custom-rendezvous-server"])
+      // rather than hardcoding "false" - this webclient always has that key
+      // seeded by ConfigJs before the engine loads (see Engine.vue), so in
+      // practice it's always false here too, but matching the real check
+      // means it stays correct if that ever changes.
+      case 'is_using_public_server':
+        result = localStorage.getItem('custom-rendezvous-server') ? 'false' : 'true'
+        break
+      // bridge.dart's sessionGetAuditServerSync - the endpoint session
+      // audit-log entries (send_note/audit_guid, already wired) actually
+      // get posted to. Ported the legacy bundle's own Fn() verbatim -
+      // getApiServer() + "/api/audit/" + <typ>.
+      case 'audit_server':
+        result = getApiServer() + '/api/audit/' + arg
+        break
+      // bridge.dart's mainGetBuildVersion-adjacent numeric version check
+      // (get_version_number) - some feature gates compare peer/build
+      // versions as an int, not a string. Ported the legacy bundle's own
+      // K() verbatim (not a standard semver encoding - the last dotted
+      // component is scaled by 10 rather than 1000, deliberately leaving
+      // room to fold in a "-N" build-number suffix in the ones place).
+      case 'get_version_number':
+        result = String(parseVersionNumber(arg))
+        break
+      // bridge.dart's mainGetMainDisplay/common.dart's screenInfo_ - LOCAL
+      // browser window/screen geometry (not the remote peer's displays,
+      // which come from peer_info). Only consumed by one non-critical
+      // toolbar info line (desktop/widgets/remote_toolbar.dart), but
+      // ported the legacy bundle's own real values (not a placeholder)
+      // since they're one-liners against the DOM's own window/screen APIs.
+      case 'main_display':
+        result = JSON.stringify({
+          w: window.screen.availWidth,
+          h: window.screen.availHeight,
+          scaleFactor: window.devicePixelRatio,
+        })
+        break
+      case 'screen_info':
+        result = JSON.stringify({
+          frame: {
+            l: window.screenX,
+            t: window.screenY,
+            r: window.screenX + window.innerWidth,
+            b: window.screenY + window.innerHeight,
+          },
+          visibleFrame: {
+            l: window.screen.availLeft,
+            t: window.screen.availTop,
+            r: window.screen.availLeft + window.screen.availWidth,
+            b: window.screen.availTop + window.screen.availHeight,
+          },
+          scaleFactor: window.devicePixelRatio,
+        })
+        break
       case 'option:local':
         result = getLocalOption(arg)
         break
