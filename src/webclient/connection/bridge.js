@@ -657,6 +657,30 @@ export function initBridge () {
       case 'langs':
         result = JSON.stringify([['en', 'English']])
         break
+      // bridge.dart's mainLoadRecentPeers/mainLoadFavPeers are Future<void>
+      // - their own getByName return value is discarded entirely. The
+      // actual data reaches Dart through the generic pushEvent/
+      // registerEventHandler mechanism instead: models/peer_model.dart's
+      // Peers class registers a handler under the exact same name
+      // ("load_recent_peers"/"load_fav_peers") expecting
+      // {peers: <JSON-encoded array of Peer.fromJson-shaped objects>} -
+      // confirmed by reading Peers._updatePeers/Peer.fromJson directly,
+      // not guessed. curConn.js's recordRecentPeer() is what actually
+      // populates recent_peers_cache, on every successful connection;
+      // favorites has no writer yet (see docs/WEBCLIENT_V2_REBUILD_PLAN.md's
+      // Phase 5 findings - "Add to Favorites" itself isn't wired), so
+      // fav_peers_cache reads back empty until that's added.
+      case 'load_recent_peers':
+        globals.pushEvent('load_recent_peers', { peers: localStorage.getItem('recent_peers_cache') || '[]' })
+        result = ''
+        break
+      case 'load_recent_peers_sync':
+        result = localStorage.getItem('recent_peers_cache') || '[]'
+        break
+      case 'load_fav_peers':
+        globals.pushEvent('load_fav_peers', { peers: localStorage.getItem('fav_peers_cache') || '[]' })
+        result = ''
+        break
       default:
         console.warn(`getByName("${name}") - unhandled case`, arg)
     }
