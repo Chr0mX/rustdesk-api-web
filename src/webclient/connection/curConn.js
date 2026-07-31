@@ -19,6 +19,7 @@ import * as globals from './globals'
 import { mapKey, sleep } from './common'
 import { initVideoDecoder, decodeFrame, closeVideoDecoder } from './videoDecoder'
 import { closeAudio } from './audioDecoder'
+import { usbHidToPositionCode, isLetterKey, isNumpadKey } from './keycodes'
 
 // TerminalModel._handleTerminalData (models/terminal_model.dart) expects
 // "data" as a base64 string ("Try to decode as base64 first") - chunked to
@@ -425,6 +426,12 @@ export default class CurConn {
         await this.handleFileResponse(msg?.file_response)
       } else if (msg?.terminal_response) {
         await this.handleTerminalResponse(msg?.terminal_response)
+      } else if (msg?.chat_message) {
+        // models/model.dart's "chat_client_mode" handler (chatModel.receive)
+        // - the default-session chat sidebar. Was entirely unhandled
+        // in both directions before (send_chat had no setByName case, and
+        // incoming chat_message wasn't dispatched here at all).
+        globals.pushEvent('chat_client_mode', { text: msg.chat_message.text || '' })
       } else if (msg?.message_box) {
         // Peer-proactively-sent message box (distinct from this client's
         // own internally-generated globals.msgbox() calls elsewhere in
@@ -823,6 +830,35 @@ export default class CurConn {
     this._ws?.sendMessage({ key_event })
   }
 
+  // Settings > Keyboard > Map Mode. usb_hid is the physical key's USB HID
+  // usage code (Flutter's web engine already computes this from the
+  // browser's native KeyboardEvent before calling bridge.dart - we don't
+  // need our own browser-code-to-USB-HID table). lock_modes is Dart's own
+  // already-computed bitmask (bit1=CapsLock, bit2=NumLock, matching
+  // src/keyboard.rs's CAPS_LOCK=1/NUM_LOCK=2 exactly) - relayed into
+  // modifiers the same way src/keyboard.rs's parse_add_lock_modes_modifiers
+  // does (only for a letter key + caps-lock bit, or a numpad key +
+  // num-lock bit).
+  handleFlutterKeyEvent (value) {
+    try {
+      const e = JSON.parse(value)
+      const usbHid = e.usb_hid
+      const down = e.down === 'true'
+      const platform = this._peerInfo?.platform || ''
+      const chr = usbHidToPositionCode(usbHid, platform)
+      const modifiers = []
+      const lockModes = e.lock_modes || 0
+      if (isLetterKey(usbHid) && (lockModes & (1 << 1))) modifiers.push(message.ControlKey.CapsLock)
+      if (isNumpadKey(usbHid) && (lockModes & (1 << 2))) modifiers.push(message.ControlKey.NumLock)
+      const key_event = message.KeyEvent.fromPartial({
+        down, press: false, chr, modifiers, mode: message.KeyboardMode.Map,
+      })
+      this._ws?.sendMessage({ key_event })
+    } catch (err) {
+      console.error('Failed to handle flutter key event: ' + err.message)
+    }
+  }
+
   ctrlAltDel () {
     const key_event = message.KeyEvent.fromPartial({ down: true })
     if (this._peerInfo?.platform === 'Windows') {
@@ -1143,6 +1179,11 @@ export default class CurConn {
 
   sendNote (connId, note) {
     console.warn('sendNote() not implemented', connId, note)
+  }
+
+  sendChat (text) {
+    const chat_message = message.ChatMessage.fromPartial({ text })
+    this._ws?.sendMessage({ chat_message })
   }
 
   setAuditGuid (guid) {

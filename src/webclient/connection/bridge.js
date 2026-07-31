@@ -473,6 +473,9 @@ export function initBridge () {
       case 'send_note':
         curConn?.sendNote('conn', arg)
         break
+      case 'send_chat':
+        curConn?.sendChat(arg)
+        break
       case 'audit_guid':
         curConn?.setAuditGuid(arg)
         break
@@ -547,19 +550,13 @@ export function initBridge () {
         break
       // models/input_model.dart's newKeyboardMode -> sessionHandleFlutterKeyEvent,
       // used when the session's keyboard mode is "map" (Settings ->
-      // Keyboard) rather than the "legacy" default that input_key (already
-      // wired) handles. Encoding a raw USB HID code into the right
-      // KeyEvent protobuf needs the full USB-HID-to-RustDesk-keycode table
-      // (hundreds of entries) plus per-platform lock-modifier handling
-      // (resources/web/js/dist/index.js's yr()/kr/be()/Qa()) - the same
-      // class of "needs a hand-copied generated table, not a quick port"
-      // gap as the input_key path's own mapKey()/KEY_MAP (see this
-      // directory's README.md item 4), just for the alternate keyboard
-      // mode. Left as an explicit stub rather than a guessed/partial
-      // mapping, which would silently send wrong keys instead of just
-      // dropping them.
+      // Keyboard) rather than the "legacy" default that input_key handles.
+      // usb_hid -> per-peer-platform position code is resolved via
+      // keycodes.js, hand-vendored from the real rdev crate (the same one
+      // src/keyboard.rs's usb_hid_code_to_win_scancode/etc call into) -
+      // see that file's header comment for the full derivation.
       case 'flutter_key_event':
-        console.warn('setByName("flutter_key_event") not implemented - see bridge.js (Settings > Keyboard > Map Mode is not supported; use Legacy mode)', arg)
+        curConn?.handleFlutterKeyEvent(arg)
         break
       default:
         console.warn(`setByName("${name}") - unhandled case`, arg)
