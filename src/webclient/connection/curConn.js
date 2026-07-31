@@ -1615,6 +1615,72 @@ function testDelay () {
 // at webclient app startup instead.
 export { testDelay }
 
+// bridge.dart's queryOnlines - decompiled from the real (up-to-date)
+// legacy webclient bundle rather than guessed, after an earlier pass
+// wrongly concluded this needed new backend work. It doesn't: hbbs (the
+// rendezvous server, the same one _start()'s punch_hole_request already
+// talks to) natively supports an online-status check via
+// RendezvousMessage.online_request/.online_response - a short-lived
+// WebSocket opened just for this query, matching the legacy bundle's own
+// "WebSock.onopen query onlines" / "WebSock.onclose query onlines" log
+// lines exactly. OnlineResponse.states is a bitset (bytes), one bit per
+// queried peer in request order, MSB-first within each byte
+// (byte = i>>3, mask = 1<<(7-(i&7))) - confirmed against the decompiled
+// bundle's own bit-unpacking loop, not guessed.
+function getQueryClientId () {
+  let id = localStorage.getItem('webclient-query-id')
+  if (!id) {
+    id = 'web-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)
+    localStorage.setItem('webclient-query-id', id)
+  }
+  return id
+}
+
+export async function queryOnlines (arg) {
+  let ids = []
+  try {
+    ids = JSON.parse(arg)
+  } catch (e) {
+    console.error('Failed to query onlines: ' + e.message)
+    return
+  }
+  if (ids.length === 0) return
+  const ws = new Websock(getDefaultUri(), true)
+  try {
+    await ws.open()
+    const online_request = rendezvous.OnlineRequest.fromPartial({ id: getQueryClientId(), peers: ids })
+    ws.sendRendezvous({ online_request })
+  } catch (e) {
+    console.error('Failed to query onlines: ' + e)
+    globals.pushEvent('callback_query_onlines', { onlines: '', offlines: ids.join(',') })
+    ws.close()
+    return
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let msg
+    try {
+      msg = await ws.next(3000)
+    } catch (e) {
+      continue
+    }
+    if (!msg || msg.key_exchange || msg.online_response === undefined) continue
+    const states = msg.online_response.states
+    const onlines = []
+    const offlines = []
+    for (let i = 0; i < ids.length; i++) {
+      const byteIdx = i >> 3
+      const bitMask = 1 << (7 - (i & 7))
+      if ((states[byteIdx] & bitMask) === bitMask) onlines.push(ids[i])
+      else offlines.push(ids[i])
+    }
+    globals.pushEvent('callback_query_onlines', { onlines: onlines.join(','), offlines: offlines.join(',') })
+    ws.close()
+    return
+  }
+  ws.close()
+  console.error('Failed to query online states, no online response')
+}
+
 function getDefaultUri (isRelay = false) {
   const host = localStorage.getItem('custom-rendezvous-server')
   return getrUriFromRs(host || defaultRendezvousHost(), isRelay)

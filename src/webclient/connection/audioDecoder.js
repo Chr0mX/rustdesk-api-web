@@ -14,11 +14,6 @@
 //   postMessage(opusPacketBytes, [transferable]) -> decodes one packet;
 //     the worker replies with the raw Int16Array of decoded PCM samples
 //     (interleaved if stereo), no id/type envelope at all.
-// It also resolves its own libopus.wasm via `self.location.href` (a
-// classic-worker Emscripten convention), so the only requirement is that
-// libopus.wasm sits next to libopus.js wherever this is loaded from - see
-// Rustdesk-Server-Installer/lib.sh's build_flutter_engine(), which copies
-// both alongside the ffmpeg-core.wasm files it already vendors.
 //
 // The player half (decoded Int16 PCM -> actually audible sound) is a
 // small hand-written port of the legacy bundle's own player (confirmed
@@ -66,50 +61,95 @@ class PcmPlayer {
 
 let worker = null
 let player = null
-// The last {channels, sampleRate} init message, re-sent if the worker had
-// to be recreated after a premature-call crash - see createWorker() below.
+let ready = false
+// The last {channels, sampleRate} init message - re-sent once the worker
+// signals it's actually ready, and again if the worker had to be
+// recreated (see createWorker() below).
 let pendingInit = null
+// Opus packets that arrived before the worker signaled ready - flushed
+// in order once it does.
+let pendingPackets = []
 
 // libopus.js registers its `message` listener synchronously at the top of
 // the script, but the actual WASM runtime (Module._Decoder_new etc.)
 // finishes loading asynchronously - a message sent immediately after
-// `new Worker(...)` can (and, confirmed live, does) arrive before the
-// module is ready, crashing with "Aborted(Assertion failed: native
-// function `Decoder_new` called before runtime initialization)".
-// Emscripten's abort() poisons the whole module instance permanently, so
-// simply retrying the same worker isn't safe - self-heal by tearing down
-// and recreating it, then replaying the last init message.
+// `new Worker(...)` can (and, confirmed live via two separate browser
+// console logs, does) arrive before the module is ready, crashing with
+// "Aborted(Assertion failed: native function `Decoder_new` called before
+// runtime initialization)". An earlier version of this fix just recreated
+// the worker and immediately resent the same message on that error - which
+// doesn't actually fix the race, it just retries at the same "immediately"
+// timing, so it hit the identical race almost every time and spun in a
+// visible crash loop (confirmed live: dozens of libopus.js/libopus.wasm
+// re-fetches, never producing sound).
+//
+// Real fix: don't guess when the module is ready - ask it. libopus.js
+// itself provides the hook for this (its own header comment: "Sometimes
+// an existing Module object exists with properties meant to overwrite the
+// default module functionality") - `Module["onRuntimeInitialized"]` calls
+// `Module.onload()` if we've predefined one, and `Module["locateFile"]`
+// resolves the wasm binary via a predefined `LIBOPUS_WASM_URL` if present.
+// A tiny wrapper script (loaded via a Blob URL, so libopus.js's own
+// `self.location`-relative wasm lookup can't accidentally kick in) predefines
+// both before `importScripts`-ing the real file, then posts a "ready"
+// message back out once `onload` fires - genuinely gating every real
+// message behind actual readiness instead of a timing guess.
 function createWorker () {
-  const w = new Worker('./libopus.js')
+  ready = false
+  const scriptUrl = new URL('./libopus.js', document.baseURI).href
+  const wasmUrl = new URL('./libopus.wasm', document.baseURI).href
+  const wrapperSrc = 'self.LIBOPUS_WASM_URL = ' + JSON.stringify(wasmUrl) + ';\n' +
+    'self.Module = { onload: function () { postMessage({ __ready: true }) } };\n' +
+    'importScripts(' + JSON.stringify(scriptUrl) + ');\n'
+  const wrapperUrl = URL.createObjectURL(new Blob([wrapperSrc], { type: 'application/javascript' }))
+  const w = new Worker(wrapperUrl)
+  URL.revokeObjectURL(wrapperUrl)
   w.onmessage = (e) => {
+    if (e.data && e.data.__ready) {
+      ready = true
+      flushPending(w)
+      return
+    }
     if (player && e.data?.length) player.feed(e.data)
   }
   w.onerror = (e) => {
-    console.warn('libopus worker crashed (likely a startup race) - recreating: ' + e.message)
+    console.error('libopus worker crashed: ' + e.message)
     w.terminate()
     worker = createWorker()
-    if (pendingInit) worker.postMessage(pendingInit)
   }
   return w
 }
 
+function flushPending (w) {
+  if (pendingInit) w.postMessage(pendingInit)
+  for (const p of pendingPackets) w.postMessage(p, [p.buffer])
+  pendingPackets = []
+}
+
 export function initAudio (channels, sampleRate) {
   pendingInit = { channels, sampleRate }
+  pendingPackets = []
   if (!worker) worker = createWorker()
   player?.close()
   player = new PcmPlayer(channels, sampleRate)
-  worker.postMessage(pendingInit)
+  if (ready) worker.postMessage(pendingInit)
 }
 
 export function playAudio (packet) {
   if (!worker) return
+  if (!ready) {
+    pendingPackets.push(packet)
+    return
+  }
   worker.postMessage(packet, [packet.buffer])
 }
 
 export function closeAudio () {
   worker?.terminate()
   worker = null
+  ready = false
   pendingInit = null
+  pendingPackets = []
   player?.close()
   player = null
 }
