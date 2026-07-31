@@ -18,6 +18,7 @@ import * as sha256 from 'fast-sha256'
 import * as globals from './globals'
 import { mapKey, sleep } from './common'
 import { initVideoDecoder, decodeFrame, closeVideoDecoder } from './videoDecoder'
+import { closeAudio } from './audioDecoder'
 
 // v1's own URI construction (SCHEMA='ws://' always, plus a flat PORT+offset
 // for every host) is NOT what the currently-deployed legacy webclient
@@ -406,6 +407,7 @@ export default class CurConn {
     clearInterval(this._interval)
     this._ws?.close()
     closeVideoDecoder()
+    closeAudio()
   }
 
   refresh () {

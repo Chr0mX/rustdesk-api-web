@@ -171,16 +171,9 @@ export function decrypt (signed, nonce, key) {
   return sodium.crypto_secretbox_open_easy(signed, makeNonce(nonce), key)
 }
 
-// --- Not yet ported from v1 - stubs so curConn.js's imports resolve ---
-
-export function initAudio (channels, sampleRate) {
-  // v1 used pcm-player + a libopus.js Web Worker for decode. The current
-  // compiled bundle already ships libopus.wasm/libopus.js directly (see
-  // Phase 1 findings) - wire this up to that instead of pcm-player once
-  // Phase 4 gets to audio.
-  console.warn('initAudio() not yet implemented', channels, sampleRate)
-}
-
-export function playAudio (packet) {
-  console.warn('playAudio() not yet implemented', packet)
-}
+// v1 used pcm-player + a libopus.js Web Worker for decode - audioDecoder.js
+// wires up the current bundle's own libopus.wasm/libopus.js instead (see
+// Phase 1 findings and audioDecoder.js's own comment for exactly how, and
+// why a small hand-written player replaces pcm-player rather than adding
+// it as a dependency).
+export { initAudio, playAudio } from './audioDecoder'
