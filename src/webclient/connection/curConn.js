@@ -493,26 +493,27 @@ export default class CurConn {
   }
 
   // Feeds the same "update_quality_status" event the test_delay handler
-  // does (see _start()'s msgLoop) - only the per-display fps half of it
-  // (matches the legacy bundle's own updateStatus(), minus its byte-rate/
-  // "speed" tracking, which needs receive-byte-count support this file's
-  // websock.js doesn't have yet - QualityMonitorModel.updateQualityStatus
-  // (models/model.dart) already treats speed/fps as independently
-  // optional, so omitting speed just leaves that one field blank rather
-  // than breaking fps). Throttled to once/second like the original,
+  // does (see _start()'s msgLoop) - fps per display plus received-byte
+  // rate, matching the legacy bundle's own updateStatus() exactly
+  // (including its formula: KB/s from websock.js's recv-byte-count divided
+  // by elapsed ms, fps from per-display decoded-frame counts divided by
+  // elapsed seconds). Throttled to once/second like the original,
   // otherwise every single decoded frame would fire a pushEvent.
   updateQualityStats () {
     const now = new Date().getTime()
     if (!this._statsUpdateTs) this._statsUpdateTs = now
     const elapsed = now - this._statsUpdateTs
     if (elapsed < 1000) return
+    const recvBytes = this._ws?.getRecvDataCount() || 0
+    this._ws?.resetRecvDataCount()
+    const speed = (recvBytes / 1024 / elapsed * 1000).toFixed(2) + ' kb/s'
     const fps = {}
     for (const display in this._frameCount) {
       fps[display] = Math.floor(this._frameCount[display] / (elapsed / 1000))
     }
     this._frameCount = {}
     this._statsUpdateTs = now
-    globals.pushEvent('update_quality_status', { fps: JSON.stringify(fps) })
+    globals.pushEvent('update_quality_status', { speed, fps: JSON.stringify(fps) })
   }
 
   // ffmpeg-core.wasm's own build expects this exact integer per codec -
@@ -526,6 +527,17 @@ export default class CurConn {
     if (vf.h264s) return [3, vf.h264s]
     if (vf.h265s) return [4, vf.h265s]
     return [undefined, undefined]
+  }
+
+  // Matches the legacy bundle's own getCodecFormat() - display-only label
+  // for the quality monitor panel's "Codec" row.
+  getCodecFormat (vf) {
+    if (vf.vp9s) return 'VP9'
+    if (vf.vp8s) return 'VP8'
+    if (vf.av1s) return 'AV1'
+    if (vf.h264s) return 'H264'
+    if (vf.h265s) return 'H265'
+    return 'Unknown'
   }
 
   // Queued rather than decoded inline: ffmpeg-core.wasm runs in a single
@@ -567,6 +579,11 @@ export default class CurConn {
       console.log('unknown codec')
       return
     }
+    const codecFormat = this.getCodecFormat(vf)
+    if (this._videoFormat !== codecFormat) {
+      this._videoFormat = codecFormat
+      globals.pushEvent('update_quality_status', { codec_format: codecFormat })
+    }
     const frameCount = s.frames?.length || 0
     this._frameCount[vf.display] = (this._frameCount[vf.display] || 0) + frameCount
     this.updateQualityStats()
@@ -588,6 +605,16 @@ export default class CurConn {
         const result = await decodeFrame(codec, frame.data.slice(0).buffer)
         if (result?.data && i === frameCount - 1) {
           globals.draw(vf.display, new Uint8Array(result.data.data))
+          // yuvFormat 5 == 4:4:4 chroma subsampling in ffmpeg-core.wasm's
+          // own encoding (matches the legacy bundle's own check) - purely
+          // a quality-monitor display value, not used for painting itself
+          // (see videoDecoder.js's own comment on why the decoded buffer
+          // needs no further color-space handling here).
+          const i444 = result.data.yuvFormat === 5
+          if (this._i444 !== i444) {
+            this._i444 = i444
+            globals.pushEvent('update_quality_status', { chroma: i444 ? '4:4:4' : '4:2:0' })
+          }
           const elapsed = new Date().getTime() - tm
           this._videoTestSpeed[1] += elapsed
           this._videoTestSpeed[0] += 1

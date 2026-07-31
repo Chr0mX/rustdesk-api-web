@@ -36,6 +36,18 @@ export default class Websock {
     this._websocket.binaryType = 'arraybuffer'
     this._latency = new Date().getTime()
     this._isRendezvous = isRendezvous
+    this._recvDataCount = 0
+  }
+
+  // Backs curConn.js's updateQualityStats() ("speed" in the quality
+  // monitor panel) - not in v1 (which never fed a quality monitor at all),
+  // added to match the legacy bundle's own same-named methods.
+  getRecvDataCount () {
+    return this._recvDataCount
+  }
+
+  resetRecvDataCount () {
+    this._recvDataCount = 0
   }
 
   latency () {
@@ -166,6 +178,7 @@ export default class Websock {
 
   _recv_message (e) {
     if (e.data instanceof window.ArrayBuffer) {
+      this._recvDataCount += e.data.byteLength
       let bytes = new Uint8Array(e.data)
       const k = this._secretKey
       if (k) {
