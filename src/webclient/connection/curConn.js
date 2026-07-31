@@ -425,6 +425,14 @@ export default class CurConn {
         await this.handleFileResponse(msg?.file_response)
       } else if (msg?.terminal_response) {
         await this.handleTerminalResponse(msg?.terminal_response)
+      } else if (msg?.message_box) {
+        // Peer-proactively-sent message box (distinct from this client's
+        // own internally-generated globals.msgbox() calls elsewhere in
+        // this file) - was entirely undispatched before, so anything the
+        // remote side pushed this way (e.g. a permission notice) never
+        // showed up at all.
+        const mb = msg.message_box
+        globals.msgbox(mb.msgtype, mb.title, mb.text, mb.link)
       }
     }
   }
@@ -1512,6 +1520,16 @@ export default class CurConn {
 
   getStatus () {
     return JSON.stringify({ status_num: this._ws ? 1 : 0 })
+  }
+
+  // bridge.dart's sessionGetConnSessionId - a low-traffic info getter with
+  // no real native equivalent to read on web, so mint a fresh id per
+  // connection attempt (same lazy-init pattern as _peerInfo).
+  getConnSessionId () {
+    if (!this._connSessionId) {
+      this._connSessionId = 'web-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)
+    }
+    return this._connSessionId
   }
 
   getFlutterUiOption (name) {

@@ -122,6 +122,20 @@ function setMainOption (key, value) {
   }
 }
 
+// mainGetEnv/mainSetEnv (bridge.dart) - "Use the global variable as the
+// environment variable in web," per bridge.dart's own comment - a plain
+// per-browser KV store, not real environment variables.
+function getEnvVar (key) {
+  return localStorage.getItem('envvar:' + key) || ''
+}
+function setEnvVar (key, value) {
+  if (value === undefined || value === null) {
+    localStorage.removeItem('envvar:' + key)
+  } else {
+    localStorage.setItem('envvar:' + key, value)
+  }
+}
+
 // bridge.dart's mainGetFav/mainStoreFav - the bare getByName/setByName
 // "fav" case (distinct from "load_fav_peers") is what "Add to Favorites"
 // actually calls (confirmed in common/widgets/peer_card.dart:
@@ -390,6 +404,11 @@ export function initBridge () {
       case 'option': {
         const e = JSON.parse(arg)
         setMainOption(e.name, e.value)
+        break
+      }
+      case 'envvar': {
+        const e = JSON.parse(arg)
+        setEnvVar(e.name, e.value)
         break
       }
       // common/widgets/peer_card.dart's "Add to Favorites" action calls
@@ -676,6 +695,32 @@ export function initBridge () {
           },
           scaleFactor: window.devicePixelRatio,
         })
+        break
+      // bridge.dart's sessionGetPlatform(isRemote: true) - the connected
+      // peer's OS, sourced straight from the real PeerInfo.platform this
+      // client already stores in curConn._peerInfo (handlePeerInfo). Feeds
+      // file transfer's Windows-vs-POSIX path-joining logic
+      // (FileController.directoryData().options.isWindows).
+      case 'platform':
+        result = curConn?._peerInfo?.platform || ''
+        break
+      // bridge.dart's own comment: "Do not return the real environment
+      // variables. Use the global variable as the environment variable in
+      // web." - a plain per-session KV store, not real env vars.
+      case 'envvar':
+        result = getEnvVar(arg)
+        break
+      case 'build_date':
+        result = ''
+        break
+      case 'conn_session_id':
+        result = curConn?.getConnSessionId() || ''
+        break
+      // Paired with send_note/setAuditGuid, which are themselves still
+      // documented stubs (see README.md item 5/curConn.js) - stays empty
+      // until those actually record something server-side.
+      case 'last_audit_note':
+        result = ''
         break
       case 'option:local':
         result = getLocalOption(arg)
