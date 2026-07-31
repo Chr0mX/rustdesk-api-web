@@ -135,7 +135,7 @@ export default class CurConn {
     // getOption/setOption/getRemember/getToggleOption etc. all assume
     // this is already an object - _start() is the only other place that
     // sets it (from globals.getPeers()[id]), but that only runs after a
-    // "connect" setByName call. Dart calls window.getByName("option:...")
+    // "session_start" setByName call. Dart calls window.getByName("option:...")
     // well before that, while constructing PeerTabModel/ServerModel/
     // ChatModel during initGlobalFFI (its very first startup pass, before
     // any peer is even chosen) - without this, that first call dereferences
