@@ -133,6 +133,7 @@ export default class CurConn {
     this._msgs = []
     this._id = ''
     this._videoTestSpeed = [0, 0]
+    this._frameCount = {}
     // getOption/setOption/getRemember/getToggleOption etc. all assume
     // this is already an object - _start() is the only other place that
     // sets it (from globals.getPeers()[id]), but that only runs after a
@@ -340,6 +341,18 @@ export default class CurConn {
         const test_delay = msg?.test_delay
         console.log(test_delay)
         if (!test_delay.from_client) {
+          // Drives the toolbar's connection-quality indicator and the
+          // quality monitor panel (models/model.dart's QualityMonitorModel,
+          // fed from setEventCallback's "update_quality_status" handler) -
+          // entirely unhandled before, so both looked permanently "not
+          // working" (blank/default) since no delay/bitrate data ever
+          // reached them, regardless of the actual connection quality.
+          // Matches the legacy bundle's own test_delay handling exactly
+          // (push before echoing the message back).
+          globals.pushEvent('update_quality_status', {
+            delay: String(test_delay.last_delay),
+            target_bitrate: String(test_delay.target_bitrate),
+          })
           this._ws?.sendMessage({ test_delay })
         }
       } else if (msg?.login_response) {
@@ -479,6 +492,29 @@ export default class CurConn {
     this._ws?.sendMessage({ misc })
   }
 
+  // Feeds the same "update_quality_status" event the test_delay handler
+  // does (see _start()'s msgLoop) - only the per-display fps half of it
+  // (matches the legacy bundle's own updateStatus(), minus its byte-rate/
+  // "speed" tracking, which needs receive-byte-count support this file's
+  // websock.js doesn't have yet - QualityMonitorModel.updateQualityStatus
+  // (models/model.dart) already treats speed/fps as independently
+  // optional, so omitting speed just leaves that one field blank rather
+  // than breaking fps). Throttled to once/second like the original,
+  // otherwise every single decoded frame would fire a pushEvent.
+  updateQualityStats () {
+    const now = new Date().getTime()
+    if (!this._statsUpdateTs) this._statsUpdateTs = now
+    const elapsed = now - this._statsUpdateTs
+    if (elapsed < 1000) return
+    const fps = {}
+    for (const display in this._frameCount) {
+      fps[display] = Math.floor(this._frameCount[display] / (elapsed / 1000))
+    }
+    this._frameCount = {}
+    this._statsUpdateTs = now
+    globals.pushEvent('update_quality_status', { fps: JSON.stringify(fps) })
+  }
+
   // ffmpeg-core.wasm's own build expects this exact integer per codec -
   // confirmed against the legacy bundle's own dispatch (resources/web/js/
   // dist/index.js), not guessed, since we're reusing that same compiled
@@ -532,6 +568,8 @@ export default class CurConn {
       return
     }
     const frameCount = s.frames?.length || 0
+    this._frameCount[vf.display] = (this._frameCount[vf.display] || 0) + frameCount
+    this.updateQualityStats()
     this.sendVideoReceived()
     const tm = new Date().getTime()
     try {
@@ -730,6 +768,20 @@ export default class CurConn {
     this._ws?.sendMessage({ mouse_event })
   }
 
+  // Ported from the legacy bundle's own toggleOption (resources/web/js/
+  // dist/index.js, decompiled) - this file's previous version only
+  // recognized a subset of real toggle names and silently no-op'ed
+  // (`default: return`, never touching _options at all) on the rest,
+  // including "show-quality-monitor" - confirmed live as exactly why
+  // that toolbar toggle did nothing: checkShowQualityMonitor
+  // (models/model.dart) reads it back via getToggleOption, which reads
+  // straight off _options, so a name that was never actually written
+  // there could never toggle on. "show-quality-monitor"/"allow_swap_key"
+  // are genuinely peer-message-free (no OptionMessage field exists for
+  // them) but still need their local option persisted, unlike the
+  // default case (for any name this switch doesn't recognize at all),
+  // which updates local state via a "Y"/unset convention instead and
+  // never sends anything to the peer.
   toggleOption (name) {
     const v = !this._options[name]
     const option = message.OptionMessage.fromPartial({})
@@ -737,6 +789,12 @@ export default class CurConn {
     switch (name) {
       case 'show-remote-cursor':
         option.show_remote_cursor = v2
+        break
+      case 'follow-remote-cursor':
+        option.follow_remote_cursor = v2
+        break
+      case 'follow-remote-window':
+        option.follow_remote_window = v2
         break
       case 'disable-audio':
         option.disable_audio = v2
@@ -750,13 +808,38 @@ export default class CurConn {
       case 'privacy-mode':
         option.privacy_mode = v2
         break
+      case 'enable-file-copy-paste':
+        option.enable_file_transfer = v2
+        break
       case 'block-input':
         option.block_input = message.OptionMessage_BoolOption.Yes
         break
       case 'unblock-input':
         option.block_input = message.OptionMessage_BoolOption.No
         break
+      case 'show-quality-monitor':
+      case 'allow_swap_key':
+        break
+      case 'view-only':
+        if (v) {
+          option.disable_keyboard = message.OptionMessage_BoolOption.Yes
+          option.disable_clipboard = message.OptionMessage_BoolOption.Yes
+          option.show_remote_cursor = message.OptionMessage_BoolOption.Yes
+          option.enable_file_transfer = message.OptionMessage_BoolOption.No
+          option.lock_after_session_end = message.OptionMessage_BoolOption.No
+        } else {
+          option.disable_keyboard = message.OptionMessage_BoolOption.No
+          option.disable_clipboard = this.getToggleOption('disable-clipboard') ? message.OptionMessage_BoolOption.Yes : message.OptionMessage_BoolOption.No
+          option.show_remote_cursor = this.getToggleOption('show-remote-cursor') ? message.OptionMessage_BoolOption.Yes : message.OptionMessage_BoolOption.No
+          option.enable_file_transfer = this.getToggleOption('enable-file-copy-paste') ? message.OptionMessage_BoolOption.Yes : message.OptionMessage_BoolOption.No
+          option.lock_after_session_end = this.getToggleOption('lock-after-session-end') ? message.OptionMessage_BoolOption.Yes : message.OptionMessage_BoolOption.No
+        }
+        break
+      case 'terminal-persistent':
+        option.terminal_persistent = v2
+        break
       default:
+        this.setOption(name, this._options[name] ? undefined : 'Y')
         return
     }
     if (name.indexOf('block-input') < 0) this.setOption(name, v)

@@ -12,6 +12,7 @@
 // globals.js's draw()/pushEvent() call them. This file only owns the
 // Dart -> JS direction.
 import CurConn, { testDelay, getApiServer } from './curConn'
+import translations from './translations'
 
 let curConn
 
@@ -159,6 +160,33 @@ export function initBridge () {
       case 'login':
         curConn.handle_login_from_ui(...Object.values(JSON.parse(arg)))
         break
+      // web/custom_cursor.dart's CursorManager.setSystemCursor/
+      // resetSystemCursor - sets the actual remote cursor image while the
+      // pointer is over the session, via a CSS `cursor` style on the
+      // <flutter-view> element (not through onGlobalEvent/pushEvent at
+      // all - a separate, direct setByName call). Entirely unhandled
+      // before, so the pointer never showed anything but the browser's
+      // plain default arrow, no matter what shape the remote cursor
+      // actually was - confirmed against the legacy bundle's own ss()
+      // (resources/web/js/dist/index.js), ported verbatim (same "auto"
+      // bare-string vs JSON {url,hotx,hoty} cases, same target element).
+      case 'cursor': {
+        let style = 'auto'
+        if (arg !== 'auto') {
+          try {
+            const c = JSON.parse(arg)
+            if (!c.url) break
+            style = `url(${c.url}) ${c.hotx} ${c.hoty}, auto`
+          } catch (e) {
+            console.error('Failed to set custom cursor: ' + e.message)
+            break
+          }
+        }
+        for (const el of document.body.children) {
+          if (el.tagName === 'FLUTTER-VIEW') el.style.cursor = style
+        }
+        break
+      }
       // Same wrong-guessed-name bug as session_add_sync/session_start above -
       // bridge.dart's sessionClose (flutter/lib/web/bridge.dart) dispatches
       // as "session_close", never "close". Unhandled, this meant clicking
@@ -204,9 +232,50 @@ export function initBridge () {
       case 'input_string':
         curConn.inputString(arg)
         break
+      // models/input_model.dart's processEventToPeer/modify build a JSON
+      // mouse event with STRING fields - {type: "down"|"up"|"wheel"|
+      // "trackpad"|"" (move), x, y, buttons: "left"|"right"|"wheel"|"back"|
+      // "forward"|"", ctrl/shift/alt/command: "true" when held (omitted
+      // otherwise) - never a numeric "mask". This case previously read
+      // `e.mask` (which never existed - always undefined, silently
+      // defaulting to 0) and dropped `e.type` entirely, so every mouse
+      // event - move, down, up, wheel alike - reached the peer encoded as
+      // mask 0 ("move, no button"), which is why clicks never did
+      // anything. Rebuilt the actual mask packing (button << 3 | type,
+      // confirmed against both curConn.js's own inputOsPassword() calls -
+      // `inputMouse(1 | (1 << 3))`/`inputMouse(2 | (1 << 3))`, i.e. left-
+      // button down then up - and the legacy bundle's own equivalent
+      // (resources/web/js/dist/index.js), decompiled to confirm the exact
+      // type/button -> integer mapping and the reverse-scroll/swap-buttons
+      // toggle-option handling alongside it.
       case 'send_mouse': {
         const e = JSON.parse(arg)
-        curConn.inputMouse(e.mask, e.x, e.y, e.alt, e.ctrl, e.shift, e.command)
+        let mask = 0
+        switch (e.type) {
+          case 'down': mask = 1; break
+          case 'up': mask = 2; break
+          case 'wheel': mask = 3; break
+          case 'trackpad': mask = 4; break
+        }
+        switch (e.buttons) {
+          case 'left': mask |= 1 << 3; break
+          case 'right': mask |= 2 << 3; break
+          case 'wheel': mask |= 4 << 3; break
+          case 'back': mask |= 8 << 3; break
+          case 'forward': mask |= 16 << 3; break
+        }
+        let x = parseInt(e.x || '0')
+        let y = parseInt(e.y || '0')
+        if ((mask === 3 || mask === 4) && curConn?.getOption('reverse_mouse_wheel') === 'Y') {
+          x = -x
+          y = -y
+        }
+        const isLeft = (mask & (1 << 3)) > 0
+        const isRight = (mask & (2 << 3)) > 0
+        if (isLeft !== isRight && curConn?.getToggleOption('swap-left-right-mouse')) {
+          mask = isLeft ? (mask & ~(1 << 3)) | (2 << 3) : (mask & ~(2 << 3)) | (1 << 3)
+        }
+        curConn.inputMouse(mask, x, y, e.alt === 'true', e.ctrl === 'true', e.shift === 'true', e.command === 'true')
         break
       }
       case 'send_2fa':
@@ -320,22 +389,21 @@ export function initBridge () {
         result = curConn?.getRemember()
         break
       // bridge.dart's translate() (flutter/lib/web/bridge.dart) calls this
-      // for every piece of UI text, expecting the translated string back -
-      // v1's own implementation (flutter/web/js/src/common.ts's translate())
-      // looks up a generated per-locale dictionary and falls back to the
-      // original (English) text when there's no entry. That dictionary was
-      // never ported here (see README.md), so every call fell through to
-      // getByName's default case, returning '' - not "untranslated", but
-      // blank, which is why every label/button/tooltip in the engine
-      // rendered empty even though the engine itself was running fine.
-      // Always returning the source text matches v1's own fallback path
-      // exactly (its dict lookup for "en" mostly returns the source text
-      // unchanged anyway, since that dictionary's keys ARE the English
-      // strings) - it just means no actual localization until a real i18n
-      // dictionary is added.
+      // for every piece of UI text, expecting the translated string back.
+      // Most call sites pass the literal English text as the key (a short
+      // button label), so a bare passthrough looked fine for those - but
+      // some pass a snake_case/kebab-case *key* expecting a real lookup
+      // (mostly longer tooltip/help text), and a passthrough left those
+      // showing up as raw identifiers instead of English sentences
+      // (confirmed live: "empty_recent_tip", "show_monitors_tip", etc. on
+      // the Recents tab and in Settings). translations.js is a hand-copied
+      // snapshot of the recovered engine's own real English source
+      // (Chr0mX/rustdesk's src/lang/en.rs) - not exhaustive, so anything
+      // missing from it still falls back to the same passthrough as
+      // before, just for a smaller set of keys than today.
       case 'translate': {
         const e = JSON.parse(arg)
-        result = e.text
+        result = translations[e.text] || e.text
         break
       }
       // bridge.dart's mainGetAppNameSync (flutter/lib/web/bridge.dart) -
