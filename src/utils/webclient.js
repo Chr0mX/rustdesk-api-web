@@ -4,26 +4,51 @@ import * as message from '@/utils/webclient/message'
 import { ElMessageBox } from 'element-plus'
 import { T } from '@/utils/i18n'
 import { useAppStore } from '@/store/app'
-import { getToken } from '@/utils/auth'
-
-
+import { webclientSession } from '@/api/config'
 
 const app = useAppStore()
 
-export const toWebClientLink = (row) => {
-  // webclient2 was removed upstream (DMCA takedown). The server now bundles
-  // a single client (a current v2-style build) at /webclient/, replacing
-  // the old v1 (flutter_hbb) build that used to live there.
-  //
-  // The server only hands out the real id-server/relay-server/api-server/
-  // key (see rustdesk-api's ConfigJs + middleware.WebclientAuth) to
-  // visitors who show up with a valid api-token or share_token - otherwise
-  // those values would be readable by anyone, unauthenticated. Since we're
-  // already logged in here, pass our token along so the webclient actually
-  // gets a working config instead of a blank one.
-  const token = getToken()
-  const query = token ? `?token=${encodeURIComponent(token)}` : ''
-  window.open(`${app.setting.rustdeskConfig.api_server}/webclient/${query}#/${row.id}`)
+// Real bug, not just a leftover: a `?token=<_admin access token>` on the
+// OUTER /webclient/ page URL does nothing at all in the webclient v2 app
+// (src/webclient) - confirmed by grep, nothing there ever reads
+// location.search/route.query.token. That app authenticates itself in one
+// of two ways: its own login form, or router/index.js's beforeEach guard
+// calling tryWebclientSessionBridge() (src/webclient/api/user.js), which
+// depends entirely on the wc_sess cookie set by webclientSession() below -
+// never on this page's own query string. Engine.vue's later
+// `/webclient-config/index.js?token=...` call does pass a token, but it's
+// the webclient app's OWN internal access_token (populated by one of the
+// two paths above), not anything derived from this URL.
+//
+// _admin's login flow (store/user.js:saveUserData) already calls
+// webclientSession() once, right after login, for exactly this reason -
+// see that function's own comment ("so opening the webclient afterwards
+// doesn't need a ?token= in the URL"). But that cookie can go stale (or
+// never have been set - e.g. a session that predates this bridge, or a
+// shorter cookie lifetime than the access token) long before the admin
+// actually clicks this button, which is what made it look like the
+// button "does nothing" - the webclient tab opens, finds no usable
+// session, and silently falls back to its own login screen instead of
+// the requested peer.
+//
+// Fix: call webclientSession() fresh right before opening the link, the
+// same way login does, so the cookie is guaranteed current regardless of
+// session age. The blank window is opened synchronously, in the same
+// click-handler tick, so browsers don't treat it as an unrequested
+// popup; its location is only set once the cookie POST has actually
+// resolved, so the new tab's own /webclient-config/index.js request goes
+// out after the cookie exists.
+export const toWebClientLink = async (row) => {
+  const win = window.open('', '_blank')
+  const url = `${app.setting.rustdeskConfig.api_server}/webclient/#/${row.id}`
+  try {
+    await webclientSession()
+  } catch (e) {
+    // Best-effort, same as saveUserData()'s own call - the webclient app's
+    // own login form is still there as a fallback if this fails.
+  }
+  if (win) win.location.href = url
+  else window.open(url)
 }
 
 export async function getPeerSlat (id) {
