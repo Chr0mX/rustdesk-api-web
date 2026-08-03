@@ -805,14 +805,11 @@ below).
 
 **Missing entirely** (falls through to the generic unhandled-case
 warning - no prior stub at all): file transfer's overwrite
-confirmation/resume/compression (`confirm_override_file` ties into the
+confirmation/resume (`confirm_override_file` ties into the
 same digest/skip state machine as `remove_all_empty_dirs` above - both
 plausible `FileAction` mappings for the recursive-delete ops fit the
-field shapes equally well without a live connection to disambiguate, and
-compressed blocks would also hit the pre-existing `decompress()` stub in
-`common.js`, which needs a zstd wasm dependency - the same gap that
-already silently drops compressed clipboard/cursor updates today, worth
-a follow-up of its own), directory file transfers (`FileTransferBlock`/
+field shapes equally well without a live connection to disambiguate),
+directory file transfers (`FileTransferBlock`/
 `FileTransferDone` only carry a bare `file_num` index, never a filename,
 so multi-file transfers need the client to already know the full ordered
 file listing beforehand - not verifiable without a live connection),
@@ -842,8 +839,39 @@ real is that `translate()` already receives the browser's own language
 on every call, so more translations would auto-localize with no picker
 needed - see recommendations below).
 
+**Also fixed live, found via real browser logs rather than static audit**
+(PR #69): a recurring, previously-unresolved "Uncaught Error at
+`window.getByName`" crash, appearing identically across several
+separate log captures - root-caused to `bridge.dart`'s
+`sessionGetCustomImageQuality`, whose `try`/`catch` only guards the
+synchronous construction of a `Future`, not the `int.parse()` call
+inside it - that call runs later as a microtask, entirely outside the
+`try`'s scope, so any peer with no explicitly-set custom quality
+(nearly all of them) gets back `''` from `getByName('option:session',
+'custom_image_quality')`, and `int.parse('')` throws a genuinely
+uncaught `FormatException`. This is a bug in the recovered engine
+itself (`flutter/lib/web/bridge.dart`, outside this repo), worked
+around from `bridge.js`'s side instead - `option:session` now returns
+`'50'` rather than an empty string when no quality was ever set, the
+same "never hand back an empty string" treatment `scroll_style`
+already had.
+
+(PR #70): `common.js`'s `decompress()` - previously an explicit stub,
+always returning `undefined` - now uses the real `zstddec` npm package
+(the same one v1's own source referenced) to actually decode
+compressed payloads. This was silently dropping compressed clipboard
+content and cursor colors (both routinely zstd-compressed on the wire)
+and blocking compressed file-transfer/terminal data outright; all now
+decompress for real. Also (PR #70): a `favicon.ico` 404 against
+`/webclient/engine/favicon.ico` - `Engine.vue`'s dynamic
+`<base href="/webclient/engine/">` insertion (needed so `main.dart.js`
+resolves its own assets correctly, see the Phase 3 correction above)
+was an unintended side effect repointing the browser's automatic
+favicon probe at the engine directory instead of the site root; fixed
+by re-asserting an absolute-href `<link rel="icon">` at the same time.
+
 Recommended order (impact vs. effort), updated: file transfer's
-recursive-delete/overwrite-confirm/resume/compression/directory-transfer
+recursive-delete/overwrite-confirm/resume/directory-transfer
 remainder → account/peer management (`account_auth`, `option:peer`/
 `peer_exists`/`peer_has_password`, `remove_peer`) → more languages
 (porting more of the ~40 real files already sitting in
