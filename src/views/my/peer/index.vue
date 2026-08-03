@@ -1,14 +1,18 @@
 <template>
   <div>
     <el-card class="list-query" shadow="hover">
-      <el-form inline label-width="150px">
+      <el-form inline label-width="80px">
         <el-form-item label="ID">
           <el-input v-model="listQuery.id" clearable/>
         </el-form-item>
         <el-form-item :label="T('Hostname')">
           <el-input v-model="listQuery.hostname" clearable/>
         </el-form-item>
-        <el-form-item :label="T('LastOnlineTime')">
+        <!-- Matches views/peer/index.vue's own override - "Last Online
+        Time" needs more room than this form's 80px base (now matching
+        the dominant filter-bar convention across other list pages, was
+        150px for the whole form just to fit this one label). -->
+        <el-form-item :label="T('LastOnlineTime')" label-width="100px">
           <el-select v-model="listQuery.time_ago" clearable>
             <el-option
                 v-for="item in timeFilters"
