@@ -652,6 +652,30 @@
   "WebclientLegacyPathTip": {
     "One": "Changing the path requires a server restart to take effect. Enabling/disabling does not."
   },
+  "RootRedirectTitle": {
+    "One": "Homepage Redirect"
+  },
+  "RootRedirectTip": {
+    "One": "Where visitors land when they open the bare domain (\"/\"). Takes effect immediately, no restart needed."
+  },
+  "RootRedirect": {
+    "One": "Redirect to"
+  },
+  "RootRedirectAdmin": {
+    "One": "Admin panel"
+  },
+  "RootRedirectWebclient": {
+    "One": "Web client"
+  },
+  "RootRedirectCustom": {
+    "One": "Custom"
+  },
+  "RootRedirectCustomPlaceholder": {
+    "One": "e.g. /webclient-legacy/ or https://example.com"
+  },
+  "RootRedirectCustomRequired": {
+    "One": "Enter a custom redirect target."
+  },
   "SaveSuccess": {
     "One": "Saved successfully."
   }

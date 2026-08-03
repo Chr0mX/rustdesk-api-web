@@ -91,6 +91,31 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card shadow="hover" style="margin-top: 16px;">
+      <template #header>{{ T('RootRedirectTitle') }}</template>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px;">
+        <template #title>{{ T('RootRedirectTip') }}</template>
+      </el-alert>
+      <el-form label-width="180px" label-position="left">
+        <el-form-item :label="T('RootRedirect')">
+          <el-radio-group v-model="rootRedirectForm.mode">
+            <el-radio value="admin">{{ T('RootRedirectAdmin') }}</el-radio>
+            <el-radio value="webclient">{{ T('RootRedirectWebclient') }}</el-radio>
+            <el-radio value="custom">{{ T('RootRedirectCustom') }}</el-radio>
+          </el-radio-group>
+          <el-input
+              v-if="rootRedirectForm.mode === 'custom'"
+              v-model="rootRedirectForm.custom"
+              :placeholder="T('RootRedirectCustomPlaceholder')"
+              style="margin-top: 8px;"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleRootRedirectSubmit">{{ T('Save') }}</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
   </div>
 </template>
 
@@ -98,7 +123,7 @@
   import { computed, onMounted, reactive, ref } from 'vue'
   import { ElMessage } from 'element-plus'
   import { T } from '@/utils/i18n'
-  import { server as getServerConfig, app as getAppConfig, updateWebclientConfig, updateWebclientLegacyConfig } from '@/api/config'
+  import { server as getServerConfig, app as getAppConfig, updateWebclientConfig, updateWebclientLegacyConfig, updateRootRedirectConfig } from '@/api/config'
 
   const isLoading = ref(true)
 
@@ -116,6 +141,14 @@
   const legacyForm = reactive({
     webclient_legacy_enabled: true,
     webclient_legacy_path: '',
+  })
+  // mode mirrors App.RootRedirect's own value semantics (see
+  // rustdesk-api's config/config.go): blank/"admin" -> admin, "webclient"
+  // -> webclient, anything else is a verbatim custom target kept in
+  // `custom` and only sent when mode is actually "custom".
+  const rootRedirectForm = reactive({
+    mode: 'admin',
+    custom: '',
   })
 
   // Best-effort client-side preview of what EffectiveWebclientRelayServer
@@ -162,6 +195,17 @@
     if (res) {
       legacyForm.webclient_legacy_enabled = res.data.webclient_legacy_enabled
       legacyForm.webclient_legacy_path = res.data.webclient_legacy_path
+      const rootRedirect = res.data.root_redirect
+      if (!rootRedirect || rootRedirect === 'admin') {
+        rootRedirectForm.mode = 'admin'
+        rootRedirectForm.custom = ''
+      } else if (rootRedirect === 'webclient') {
+        rootRedirectForm.mode = 'webclient'
+        rootRedirectForm.custom = ''
+      } else {
+        rootRedirectForm.mode = 'custom'
+        rootRedirectForm.custom = rootRedirect
+      }
     }
   }
   onMounted(() => {
@@ -179,6 +223,19 @@
 
   const handleLegacySubmit = async () => {
     const res = await updateWebclientLegacyConfig({ ...legacyForm }).catch(_ => false)
+    if (res) {
+      ElMessage.success(T('SaveSuccess'))
+      await fetchLegacyConfig()
+    }
+  }
+
+  const handleRootRedirectSubmit = async () => {
+    const target = rootRedirectForm.mode === 'custom' ? rootRedirectForm.custom.trim() : rootRedirectForm.mode
+    if (rootRedirectForm.mode === 'custom' && !target) {
+      ElMessage.warning(T('RootRedirectCustomRequired'))
+      return
+    }
+    const res = await updateRootRedirectConfig({ root_redirect: target }).catch(_ => false)
     if (res) {
       ElMessage.success(T('SaveSuccess'))
       await fetchLegacyConfig()
