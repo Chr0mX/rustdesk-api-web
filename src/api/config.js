@@ -44,6 +44,18 @@ export function updateWebclientLegacyConfig (data) {
   })
 }
 
+// updateRootRedirectConfig sets where "/" sends visitors - blank/"admin"
+// keeps the default (/_admin/), "webclient" points at /webclient/
+// instead, anything else is used verbatim (an absolute path or a full
+// external URL). Read live on every request, no restart needed.
+export function updateRootRedirectConfig (data) {
+  return request({
+    url: '/config/root-redirect',
+    method: 'post',
+    data,
+  })
+}
+
 // webclientSession proactively establishes the webclient's auth session
 // (see rustdesk-api's middleware.WebclientAuth) for the current logged-in
 // user, so opening the webclient afterwards doesn't need a ?token= in the
