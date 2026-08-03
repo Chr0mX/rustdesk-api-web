@@ -741,9 +741,26 @@ export function initBridge () {
       // string value: ''", repeated on every single decoded frame once a
       // peer without this option ever explicitly set connects). Default it
       // to the same 'scrollauto' Dart would have used for a real null.
+      // custom_image_quality needs the same "never hand back an empty
+      // string" treatment as scroll_style above, for a different reason:
+      // bridge.dart's sessionGetCustomImageQuality does
+      // `int.parse(js.context.callMethod('getByName', ['option:session',
+      // 'custom_image_quality']))` wrapped in a try/catch that only
+      // guards the synchronous `Future(() => ...)` *construction*, not
+      // the closure itself - the actual int.parse() runs later, in a
+      // microtask, outside that try/catch's scope, so int.parse('')
+      // throwing FormatException on any peer that's never explicitly set
+      // a custom quality becomes a genuinely uncaught error (confirmed
+      // live, repeatedly, right after connecting: "Uncaught Error at
+      // window.getByName" with an otherwise-empty message, matching an
+      // uncaught microtask rejection rather than a synchronous throw).
+      // This is a bug in the recovered engine itself, not something
+      // fixable from this side of the bridge - working around it here by
+      // never returning a non-numeric string for this specific key.
       case 'option:session':
         result = curConn?.getOption(arg)
         if (arg === 'scroll_style' && !result) result = 'scrollauto'
+        if (arg === 'custom_image_quality' && !result) result = '50'
         break
       case 'option:toggle':
         result = curConn?.getToggleOption(arg)
