@@ -426,12 +426,6 @@ export default class CurConn {
         await this.handleFileResponse(msg?.file_response)
       } else if (msg?.terminal_response) {
         await this.handleTerminalResponse(msg?.terminal_response)
-      } else if (msg?.chat_message) {
-        // models/model.dart's "chat_client_mode" handler (chatModel.receive)
-        // - the default-session chat sidebar. Was entirely unhandled
-        // in both directions before (send_chat had no setByName case, and
-        // incoming chat_message wasn't dispatched here at all).
-        globals.pushEvent('chat_client_mode', { text: msg.chat_message.text || '' })
       } else if (msg?.message_box) {
         // Peer-proactively-sent message box (distinct from this client's
         // own internally-generated globals.msgbox() calls elsewhere in
@@ -757,7 +751,15 @@ export default class CurConn {
     if (misc.audio_format) {
       globals.initAudio(misc.audio_format.channels, misc.audio_format.sample_rate)
     } else if (misc.chat_message) {
-      globals.pushEvent('chat', { text: misc.chat_message.text })
+      // This is the ONLY real wire path for chat - chat_message exists
+      // solely inside Misc (message.proto: Misc.chat_message, field 4),
+      // not as a top-level Message field (an earlier version of this file
+      // wrongly assumed a top-level msg.chat_message case too; that
+      // branch could never fire and has been removed). Event name must be
+      // "chat_client_mode" to match model.dart's chatModel.receive()
+      // handler in the fixed branch - this used to push the wrong name
+      // ("chat"), which that switch has no case for.
+      globals.pushEvent('chat_client_mode', { text: misc.chat_message.text })
     } else if (misc.permission_info) {
       const p = misc.permission_info
       console.info('Change permission ' + p.permission + ' -> ' + p.enabled)
@@ -1181,9 +1183,21 @@ export default class CurConn {
     console.warn('sendNote() not implemented', connId, note)
   }
 
+  // Real bug, not just a gap: chat_message is NOT a top-level Message
+  // oneof field - confirmed directly against the real message.proto,
+  // which only has it inside Misc (message Misc { ... ChatMessage
+  // chat_message = 4; ... }). The original version of this method built
+  // `{ chat_message }` directly as if Message had that field - ts-proto's
+  // fromPartial/encode silently ignores object keys that don't match any
+  // real field, so every outgoing chat message was actually sent as an
+  // empty Message with nothing set at all. Wrapping in Misc is the fix;
+  // receiving already goes through handleMisc()'s misc.chat_message
+  // branch above, which was real all along (only its pushEvent name was
+  // wrong - see that branch's own comment).
   sendChat (text) {
     const chat_message = message.ChatMessage.fromPartial({ text })
-    this._ws?.sendMessage({ chat_message })
+    const misc = message.Misc.fromPartial({ chat_message })
+    this._ws?.sendMessage({ misc })
   }
 
   setAuditGuid (guid) {
@@ -1627,6 +1641,18 @@ export { testDelay }
 // queried peer in request order, MSB-first within each byte
 // (byte = i>>3, mask = 1<<(7-(i&7))) - confirmed against the decompiled
 // bundle's own bit-unpacking loop, not guessed.
+//
+// Result goes through pushRegisteredEvent, not pushEvent -
+// models/peer_model.dart's Peers class listens for
+// "callback_query_onlines" via platformFFI.registerEventHandler(), a
+// separate JS entry point (window.onRegisteredEvent) from the generic
+// fixed-branch one (window.onGlobalEvent) pushEvent() talks to - see
+// globals.js's own header comment on makeEventChannel(). Sending it
+// through pushEvent reaches Dart's generic else-branch instead, which
+// just logs "Event is not handled in the fixed branch:
+// callback_query_onlines" and does nothing - confirmed live, this was
+// the actual reason the online-status indicator never updated even
+// after the real hbbs round trip below started working.
 function getQueryClientId () {
   let id = localStorage.getItem('webclient-query-id')
   if (!id) {
@@ -1652,7 +1678,7 @@ export async function queryOnlines (arg) {
     ws.sendRendezvous({ online_request })
   } catch (e) {
     console.error('Failed to query onlines: ' + e)
-    globals.pushEvent('callback_query_onlines', { onlines: '', offlines: ids.join(',') })
+    globals.pushRegisteredEvent('callback_query_onlines', { onlines: '', offlines: ids.join(',') })
     ws.close()
     return
   }
@@ -1673,7 +1699,7 @@ export async function queryOnlines (arg) {
       if ((states[byteIdx] & bitMask) === bitMask) onlines.push(ids[i])
       else offlines.push(ids[i])
     }
-    globals.pushEvent('callback_query_onlines', { onlines: onlines.join(','), offlines: offlines.join(',') })
+    globals.pushRegisteredEvent('callback_query_onlines', { onlines: onlines.join(','), offlines: offlines.join(',') })
     ws.close()
     return
   }

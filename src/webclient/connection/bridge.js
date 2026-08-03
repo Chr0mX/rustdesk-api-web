@@ -791,23 +791,30 @@ export function initBridge () {
         break
       // bridge.dart's mainLoadRecentPeers/mainLoadFavPeers are Future<void>
       // - their own getByName return value is discarded entirely. The
-      // actual data reaches Dart through the generic pushEvent/
-      // registerEventHandler mechanism instead: models/peer_model.dart's
-      // Peers class registers a handler under the exact same name
-      // ("load_recent_peers"/"load_fav_peers") expecting
-      // {peers: <JSON-encoded array of Peer.fromJson-shaped objects>} -
-      // confirmed by reading Peers._updatePeers/Peer.fromJson directly,
-      // not guessed. curConn.js's recordRecentPeer() is what actually
-      // populates recent_peers_cache, on every successful connection.
+      // actual data reaches Dart through Dart's own
+      // platformFFI.registerEventHandler mechanism instead:
+      // models/peer_model.dart's Peers class registers a handler under
+      // the exact same name ("load_recent_peers"/"load_fav_peers")
+      // expecting {peers: <JSON-encoded array of Peer.fromJson-shaped
+      // objects>} - confirmed by reading Peers._updatePeers/Peer.fromJson
+      // directly, not guessed. That's window.onRegisteredEvent, a
+      // separate JS entry point from the generic window.onGlobalEvent
+      // pushEvent() talks to (see globals.js's makeEventChannel comment) -
+      // using pushEvent here reached Dart's unrelated fixed-branch
+      // else-clause instead of Peers' actual handler, so the Recents/
+      // Favorites tabs never actually populated despite this data being
+      // computed correctly. curConn.js's recordRecentPeer() is what
+      // actually populates recent_peers_cache, on every successful
+      // connection.
       case 'load_recent_peers':
-        globals.pushEvent('load_recent_peers', { peers: localStorage.getItem('recent_peers_cache') || '[]' })
+        globals.pushRegisteredEvent('load_recent_peers', { peers: localStorage.getItem('recent_peers_cache') || '[]' })
         result = ''
         break
       case 'load_recent_peers_sync':
         result = localStorage.getItem('recent_peers_cache') || '[]'
         break
       case 'load_fav_peers':
-        globals.pushEvent('load_fav_peers', { peers: JSON.stringify(buildPeerRecordsById(getFavIds())) })
+        globals.pushRegisteredEvent('load_fav_peers', { peers: JSON.stringify(buildPeerRecordsById(getFavIds())) })
         result = ''
         break
       case 'fav':

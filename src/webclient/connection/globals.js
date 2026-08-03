@@ -70,16 +70,82 @@ function jsonfyForDart (payload) {
   return tmp
 }
 
-// Forwards to the Flutter engine's window.onGlobalEvent, if it's
-// registered (see Phase 3 findings) - otherwise a no-op, so this can still
-// run (e.g. in tests, or before the engine has initialized) without
-// throwing.
-export function pushEvent (name, payload) {
-  if (typeof window.onGlobalEvent !== 'function') {
-    console.warn(`pushEvent("${name}") dropped - window.onGlobalEvent not registered yet (engine not loaded?)`)
-    return
+// The recovered engine actually has TWO separate JS entry points for
+// events, not one - confirmed by reading models/web_model.dart directly:
+//   - window.onGlobalEvent (PlatformFFI.setEventCallback, models/model.dart
+//     line ~778) routes into model.dart's startEventListener, a single
+//     giant if/else chain keyed by name ("the fixed branch" - msgbox,
+//     cursor_data, terminal_response, file_dir, job_progress/done/error,
+//     chat_client_mode, connection_ready, permission, etc).
+//   - window.onRegisteredEvent (PlatformFFI.init) routes into a
+//     completely separate per-name handler map (tryHandle(), populated by
+//     Dart's own platformFFI.registerEventHandler(eventName, listenerName,
+//     handler) calls) - models/peer_model.dart's Peers class (backing the
+//     Recents/Favorites/address-book/group tabs) and the online-status
+//     query (callback_query_onlines) both listen this way, NOT through
+//     the fixed branch.
+// Sending a registerEventHandler-only name (callback_query_onlines,
+// load_recent_peers, load_fav_peers) through onGlobalEvent reaches the
+// fixed branch's generic else, which only logs "Event is not handled in
+// the fixed branch: <name>" and does nothing - confirmed live. There is
+// no single unified channel; the caller has to know which one a given
+// event name needs (see bridge.js/curConn.js call sites' own comments).
+//
+// Both globals are assigned by Dart at slightly different points during
+// startup (onRegisteredEvent during PlatformFFI.init(), onGlobalEvent
+// once a session model exists) - and query_onlines in particular can
+// resolve its hbbs round trip before either one is ready yet (it starts
+// firing immediately after the address-book pull, before the engine has
+// finished registering anything). A dropped event used to just be lost
+// forever ("dropped - window.onGlobalEvent not registered yet"),
+// confirmed live as the reason the very first online-status update never
+// reached the UI. Fixed with a real queue: define both as accessor
+// properties so assignment is intercepted regardless of load order, and
+// flush whatever queued up the moment each one is actually set.
+function makeEventChannel (globalName) {
+  let real = typeof window[globalName] === 'function' ? window[globalName] : null
+  const pending = []
+  Object.defineProperty(window, globalName, {
+    configurable: true,
+    enumerable: true,
+    get () { return real },
+    set (fn) {
+      real = fn
+      if (typeof fn === 'function' && pending.length) {
+        const queued = pending.splice(0)
+        for (const json of queued) fn(json)
+      }
+    },
+  })
+  return function send (name, payload) {
+    const json = JSON.stringify({ name, ...jsonfyForDart(payload) })
+    if (typeof real !== 'function') {
+      console.warn(`push to window.${globalName}("${name}") queued - not registered yet (engine not loaded?)`)
+      pending.push(json)
+      return
+    }
+    real(json)
   }
-  window.onGlobalEvent(JSON.stringify({ name, ...jsonfyForDart(payload) }))
+}
+
+const sendGlobalEvent = makeEventChannel('onGlobalEvent')
+const sendRegisteredEvent = makeEventChannel('onRegisteredEvent')
+
+// For event names model.dart's startEventListener "fixed branch" switch
+// matches directly (msgbox, cursor_data, terminal_response, file_dir,
+// job_progress/done/error, chat_client_mode, connection_ready,
+// permission, and similar).
+export function pushEvent (name, payload) {
+  sendGlobalEvent(name, payload)
+}
+
+// For event names only reachable via Dart's own
+// platformFFI.registerEventHandler(name, ...) - currently
+// callback_query_onlines, load_recent_peers, load_fav_peers. Use this
+// instead of pushEvent() for those; see this function's own header
+// comment for how the two channels differ.
+export function pushRegisteredEvent (name, payload) {
+  sendRegisteredEvent(name, payload)
 }
 
 export function msgbox (type, title, text, link = '') {
