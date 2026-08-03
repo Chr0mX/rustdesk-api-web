@@ -46,32 +46,42 @@
       <el-card class="list-body" shadow="hover">
         <!--      <el-tag type="danger" style="margin-bottom: 10px">不建议在此操作地址簿，可能会造成数据不同步</el-tag>-->
         <el-table :data="listRes.list" v-loading="listRes.loading" border>
-          <el-table-column prop="id" label="ID" align="center" width="200">
+          <el-table-column prop="id" label="ID" align="center" min-width="200">
             <template #default="{row}">
               <span>{{ row.id }} <el-icon @click="handleClipboard(row.id, $event)"><CopyDocument/></el-icon></span>
             </template>
           </el-table-column>
-          <el-table-column prop="collection_id" :label="T('Name')" align="center" width="150">
+          <el-table-column prop="collection_id" :label="T('Name')" align="center" min-width="150">
             <template #default="{row}">
               <span v-if="row.collection_id === 0">{{ T('MyAddressBook') }}</span>
               <span v-else>{{ collectionListRes.list.find(c => c.id === row.collection_id)?.name }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="username" :label="T('Username')" align="center" width="150"/>
-          <el-table-column prop="hostname" :label="T('Hostname')" align="center" width="150"/>
-          <el-table-column prop="platform" :label="T('Platform')" align="center" width="120"/>
-          <el-table-column prop="tags" :label="T('Tags')" align="center"/>
+          <el-table-column prop="username" :label="T('Username')" align="center" min-width="150"/>
+          <el-table-column prop="hostname" :label="T('Hostname')" align="center" min-width="150"/>
+          <el-table-column prop="platform" :label="T('Platform')" align="center" min-width="120"/>
+          <el-table-column prop="tags" :label="T('Tags')" align="center" min-width="120"/>
           <!--        <el-table-column prop="created_at" label="创建时间" align="center"/>-->
           <!--        <el-table-column prop="updated_at" label="更新时间" align="center"/>-->
-          <el-table-column prop="alias" :label="T('Alias')" align="center" width="150"/>
-          <el-table-column prop="hash" :label="T('Hash')" align="center" width="150" show-overflow-tooltip/>
-          <el-table-column :label="T('Actions')" align="center" class-name="table-actions" width="600" fixed="right">
+          <el-table-column prop="alias" :label="T('Alias')" align="center" min-width="150"/>
+          <el-table-column prop="hash" :label="T('Hash')" align="center" min-width="150" show-overflow-tooltip/>
+          <el-table-column :label="T('Actions')" align="center" class-name="table-actions" min-width="220" fixed="right">
             <template #default="{row}">
-              <el-button type="success" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
-              <el-button v-if="appStore.setting.appConfig.web_client" type="success" @click="toWebClientLink(row)">Web Client</el-button>
-              <el-button v-if="appStore.setting.appConfig.web_client" type="primary" @click="toShowShare(row)">{{ T('ShareByWebClient') }}</el-button>
-              <el-button @click="toEdit(row)">{{ T('Edit') }}</el-button>
-              <el-button type="danger" @click="del(row)">{{ T('Delete') }}</el-button>
+              <el-button type="success" size="small" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
+              <el-button v-if="appStore.setting.appConfig.web_client" type="success" size="small" @click="toWebClientLink(row)">Web Client</el-button>
+              <el-dropdown trigger="click" @command="cmd => handleRowCommand(cmd, row)">
+                <el-button size="small">
+                  {{ T('More') }}
+                  <el-icon class="el-icon--right"><ArrowDown/></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-if="appStore.setting.appConfig.web_client" command="share">{{ T('ShareByWebClient') }}</el-dropdown-item>
+                    <el-dropdown-item command="edit">{{ T('Edit') }}</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided>{{ T('Delete') }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
         </el-table>
@@ -176,7 +186,7 @@
   import { useAppStore } from '@/store/app'
   import { connectByClient } from '@/utils/peer'
   import { handleClipboard } from '@/utils/clipboard'
-  import { CopyDocument } from '@element-plus/icons'
+  import { ArrowDown, CopyDocument } from '@element-plus/icons'
 
   const appStore = useAppStore()
   const tagList = ref([])
@@ -243,6 +253,15 @@
     }
     // listQuery.tags = checkedTags.value.join(',')
     // getList()
+  }
+
+  // Same actions-column collapse as views/peer/index.vue -
+  // ShareByWebClient/Edit/Delete moved into this dropdown so the column
+  // doesn't need a 600px fixed width.
+  const handleRowCommand = (command, row) => {
+    if (command === 'share') toShowShare(row)
+    else if (command === 'edit') toEdit(row)
+    else if (command === 'delete') del(row)
   }
 </script>
 

@@ -69,15 +69,15 @@
       <el-table :data="listRes.list" v-loading="listRes.loading" border size="small" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" align="center"/>
         <template v-for="c in visibleColumns.filter(cc => cc.visible)" :key="c">
-          <el-table-column v-if="c.name==='id'" prop="id" label="ID" align="center" width="150">
+          <el-table-column v-if="c.name==='id'" prop="id" label="ID" align="center" min-width="150">
             <template #default="{row}">
               <span>{{ row.id }} <el-icon @click="handleClipboard(row.id, $event)"><CopyDocument/></el-icon></span>
             </template>
           </el-table-column>
-          <el-table-column v-if="c.name==='cpu'" prop="cpu" label="CPU" align="center" width="100" show-overflow-tooltip/>
-          <el-table-column v-if="c.name==='hostname'" prop="hostname" :label="T('Hostname')" align="center" width="120"/>
-          <el-table-column v-if="c.name==='memory'" prop="memory" :label="T('Memory')" align="center" width="120"/>
-          <el-table-column v-if="c.name==='os'" prop="os" :label="T('Os')" align="center" width="120" show-overflow-tooltip/>
+          <el-table-column v-if="c.name==='cpu'" prop="cpu" label="CPU" align="center" min-width="100" show-overflow-tooltip/>
+          <el-table-column v-if="c.name==='hostname'" prop="hostname" :label="T('Hostname')" align="center" min-width="120"/>
+          <el-table-column v-if="c.name==='memory'" prop="memory" :label="T('Memory')" align="center" min-width="120"/>
+          <el-table-column v-if="c.name==='os'" prop="os" :label="T('Os')" align="center" min-width="120" show-overflow-tooltip/>
           <el-table-column v-if="c.name==='last_online_time'" prop="last_online_time" :label="T('LastOnlineTime')" align="center" min-width="120">
             <template #default="{row}">
               <div class="last_oline_time">
@@ -86,27 +86,37 @@
             </template>
           </el-table-column>
           <el-table-column v-if="c.name==='last_online_ip'" prop="last_online_ip" :label="T('LastOnlineIp')" align="center" min-width="120"/>
-          <el-table-column v-if="c.name==='username'" prop="username" :label="T('Username')" align="center" width="120"/>
-          <el-table-column v-if="c.name==='group_id'" prop="group_id" :label="T('Group')" align="center" width="120">
+          <el-table-column v-if="c.name==='username'" prop="username" :label="T('Username')" align="center" min-width="120"/>
+          <el-table-column v-if="c.name==='group_id'" prop="group_id" :label="T('Group')" align="center" min-width="120">
             <template #default="{row}">
               <span v-if="row.group_id"> <el-tag>{{ groupListRes.list?.find(g => g.id === row.group_id)?.name }} </el-tag> </span>
               <span v-else> - </span>
             </template>
           </el-table-column>
-          <el-table-column v-if="c.name==='uuid'" prop="uuid" :label="T('Uuid')" align="center" width="120" show-overflow-tooltip/>
-          <el-table-column v-if="c.name==='version'" prop="version" :label="T('Version')" align="center" width="80"/>
-          <el-table-column v-if="c.name==='alias'" prop="alias" :label="T('Alias')" align="center" width="80"/>
-          <el-table-column v-if="c.name==='created_at'" prop="created_at" :label="T('CreatedAt')" align="center" width="150"/>
-          <el-table-column v-if="c.name==='updated_at'" prop="updated_at" :label="T('UpdatedAt')" align="center" width="150"/>
+          <el-table-column v-if="c.name==='uuid'" prop="uuid" :label="T('Uuid')" align="center" min-width="120" show-overflow-tooltip/>
+          <el-table-column v-if="c.name==='version'" prop="version" :label="T('Version')" align="center" min-width="80"/>
+          <el-table-column v-if="c.name==='alias'" prop="alias" :label="T('Alias')" align="center" min-width="80"/>
+          <el-table-column v-if="c.name==='created_at'" prop="created_at" :label="T('CreatedAt')" align="center" min-width="150"/>
+          <el-table-column v-if="c.name==='updated_at'" prop="updated_at" :label="T('UpdatedAt')" align="center" min-width="150"/>
         </template>
 
-        <el-table-column :label="T('Actions')" align="center" width="500" class-name="table-actions" fixed="right">
+        <el-table-column :label="T('Actions')" align="center" min-width="230" class-name="table-actions" fixed="right">
           <template #default="{row}">
-            <el-button type="success" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
-            <el-button v-if="appStore.setting.appConfig.web_client" type="success" @click="toWebClientLink(row)">Web Client</el-button>
-            <el-button type="primary" @click="toAddressBook(row)">{{ T('AddToAddressBook') }}</el-button>
-            <el-button @click="toEdit(row)">{{ T('Edit') }}</el-button>
-            <el-button type="danger" @click="del(row)">{{ T('Delete') }}</el-button>
+            <el-button type="success" size="small" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
+            <el-button v-if="appStore.setting.appConfig.web_client" type="success" size="small" @click="toWebClientLink(row)">Web Client</el-button>
+            <el-dropdown trigger="click" @command="cmd => handleRowCommand(cmd, row)">
+              <el-button size="small">
+                {{ T('More') }}
+                <el-icon class="el-icon--right"><ArrowDown/></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="addressBook">{{ T('AddToAddressBook') }}</el-dropdown-item>
+                  <el-dropdown-item command="edit">{{ T('Edit') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>{{ T('Delete') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -455,6 +465,17 @@
   const toAddressBook = (row) => {
     clickRow.value = row
     ABFormVisible.value = true
+  }
+
+  // Actions column collapsed the less-frequently-used row actions
+  // (AddToAddressBook/Edit/Delete) into this dropdown so the column
+  // doesn't need a 500px fixed width - see docs on the table's min-width
+  // change above. Link/Web Client stay as direct buttons since they're
+  // this page's primary actions.
+  const handleRowCommand = (command, row) => {
+    if (command === 'addressBook') toAddressBook(row)
+    else if (command === 'edit') toEdit(row)
+    else if (command === 'delete') del(row)
   }
 
   const multipleSelection = ref([])
