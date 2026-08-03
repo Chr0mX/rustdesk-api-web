@@ -617,6 +617,65 @@ exception appended to this doc.
 
 #### Phase 5 findings (retroactive - done post-cutover, not before)
 
+**IMPORTANT, load-bearing architectural correction (PR #67), read this
+before adding any new `pushEvent()` call**: the recovered engine has
+TWO separate JS event entry points, not one - confirmed by reading
+`models/web_model.dart` directly, not assumed.
+- `window.onGlobalEvent` (set via `PlatformFFI.setEventCallback`,
+  `models/model.dart` around line 778) routes into
+  `startEventListener`'s single big if/else "fixed branch" switch -
+  `msgbox`, `cursor_data`, `terminal_response`, `file_dir`,
+  `job_progress`/`done`/`error`, `chat_client_mode`, `connection_ready`,
+  `permission`, and everything else keyed by name in that one function.
+- `window.onRegisteredEvent` (set during `PlatformFFI.init()`, much
+  earlier in startup) routes into a completely separate handler map
+  (`tryHandle()`), populated by Dart's own
+  `platformFFI.registerEventHandler(eventName, listenerName, handler)`
+  calls - currently only `models/peer_model.dart`'s `Peers` class
+  (backing Recents/Favorites/address-book/group peer lists) and the
+  online-status query (`callback_query_onlines`).
+
+Every `pushEvent()` call in this codebase used to only ever reach
+`onGlobalEvent`. For fixed-branch names that's correct; for
+registerEventHandler-only names it silently lands in Dart's generic
+else-branch instead ("Event is not handled in the fixed branch:
+`<name>`" - confirmed live) and the real handler never runs. This was
+the actual reason `callback_query_onlines`/`load_recent_peers`/
+`load_fav_peers` never worked even after their own wire-level fixes
+landed (PRs #51/#54/#65) - getting the data right wasn't enough if it
+never reached the listener that needed it. `globals.js` now exposes
+both channels for real (`makeEventChannel()`) - `pushEvent()` still
+targets `onGlobalEvent`; the new `pushRegisteredEvent()` targets
+`onRegisteredEvent`. **Before wiring any new incoming-event push,
+check which one the Dart side actually uses** - grep for the event name
+against both `registerEventHandler(` and the `startEventListener`
+if/else chain in `flutter/lib/models/model.dart` and `peer_model.dart`,
+don't assume `pushEvent()` is a universal channel.
+
+Both channels also needed a queue-until-ready fix: `query_onlines` in
+particular can resolve its hbbs round trip before either global is even
+registered yet (it fires immediately after the address-book pull, very
+early in startup), and a dropped event used to just be lost forever
+("pushEvent dropped - window.onGlobalEvent not registered yet" -
+confirmed live as the reason the very first online-status update never
+reached the UI). Both channels now queue and flush on registration
+instead of dropping.
+
+Chat had a second, independent bug on top of this (also PR #67):
+`chat_message` is NOT a top-level `Message` oneof field in the real
+`message.proto` - it only exists inside `Misc`
+(`Misc.chat_message`, field 4). `sendChat()` built `{ chat_message }`
+directly as if `Message` had that field; ts-proto's `fromPartial`/
+`encode` silently ignores object keys that don't match a real field, so
+every outgoing chat message was actually sent as an empty `Message`
+with nothing set at all - not a routing problem, a genuinely wrong wire
+message. Fixed by wrapping in `Misc`. The already-correct
+`Misc.chat_message` receive path (`handleMisc`) was separately pushing
+the wrong event name (`"chat"` instead of `"chat_client_mode"`, which
+model.dart's fixed branch has no case for) - fixed too, and the dead
+top-level `msg.chat_message` branch in `msgLoop` (which could never
+fire, since that field doesn't exist there) is removed.
+
 Phase 6 shipped before this phase was formally run (see Phase 6's own
 notes - cutover became urgent once the connect/video-decode bugs below
 were found live). This is the deferred pass, done by cross-referencing
