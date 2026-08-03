@@ -783,6 +783,17 @@ export function initBridge () {
       case 'my_id':
         result = ''
         break
+      // bridge.dart's mainGetLoginDeviceInfo reads this to fill in the
+      // device-info blob's "name" field (shown to the peer as "connecting
+      // from"). Confirmed against the real legacy bundle rather than
+      // guessed: its own getByName("my_name") case is a hardcoded literal
+      // "web", not derived from anything browser-specific - matched here
+      // rather than inventing a more descriptive value. Previously
+      // unhandled (fell through to the generic "unhandled case" warning,
+      // confirmed live).
+      case 'my_name':
+        result = 'web'
+        break
       // bridge.dart's mainGetUuid backs the same device-identification
       // pair as my_id above, sent as part of LoginRequest when logging
       // into the engine's own internal Account tab (common/widgets/
