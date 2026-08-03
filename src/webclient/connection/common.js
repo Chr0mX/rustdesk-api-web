@@ -74,11 +74,36 @@ export function mapKey (name, isDesktop) {
   return message.KeyEvent.fromPartial({ control_key })
 }
 
-// Needs the zstd wasm decoder (v1 used the "zstddec" npm package) - not
-// yet added as a dependency.
+// v1 used the "zstddec" npm package (by Don McCurdy - the same decoder
+// three.js's GLTF loader uses for its meshopt/draco-adjacent paths), now
+// added as a real dependency. Its ZSTDDecoder wraps a small embedded
+// wasm binary; init() instantiates it once, decode() calls the wasm's
+// ZSTD_findDecompressedSize/ZSTD_decompress directly - no separate
+// "give me a size hint" argument is needed here since none of this
+// file's callers (curConn.js: CursorData.colors, Clipboard.content,
+// file-transfer compressed blocks) have a size to hand it anyway.
+//
+// Kept as a lazily-created singleton (decoderPromise) rather than a
+// module-level `await` so this file stays a normal sync ES module - the
+// wasm instantiation only happens the first time a caller actually hits
+// a compressed payload.
+import { ZSTDDecoder } from 'zstddec'
+
+let decoderPromise = null
+function getDecoder () {
+  if (!decoderPromise) {
+    decoderPromise = (async () => {
+      const decoder = new ZSTDDecoder()
+      await decoder.init()
+      return decoder
+    })()
+  }
+  return decoderPromise
+}
+
 export async function decompress (compressedArray) {
-  console.warn('decompress() not yet implemented - needs a zstd wasm decoder dependency')
-  return undefined
+  const decoder = await getDecoder()
+  return decoder.decode(compressedArray instanceof Uint8Array ? compressedArray : new Uint8Array(compressedArray))
 }
 
 // Needs LANGS, from the same gen_js_from_hbb.py output as mapKey's
