@@ -1,13 +1,17 @@
 <template>
   <div>
     <el-card class="list-query" shadow="hover">
-      <el-form inline label-width="60px">
+      <el-form inline label-width="80px">
         <el-form-item label="ID">
           <el-input v-model="listQuery.id" clearable/>
         </el-form-item>
         <el-form-item :label="T('Hostname')">
           <el-input v-model="listQuery.hostname" clearable/>
         </el-form-item>
+        <!-- "Last Online Time" needs more room than this form's 80px
+        base (matching the dominant filter-bar convention across other
+        list pages) can give it without wrapping - a real, deliberate
+        override, not drift, same as before. -->
         <el-form-item :label="T('LastOnlineTime')" label-width="100px">
           <el-select v-model="listQuery.time_ago" clearable>
             <el-option

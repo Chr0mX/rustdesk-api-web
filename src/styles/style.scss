@@ -27,16 +27,24 @@ body {
     "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 }
 
-.list-body {
-  margin: 10px 0;
-}
-
-.dialog-form {
-  max-width: 600px;
-  margin: 20px auto;
+// Almost every list page is the same 3-card stack (filter bar / table /
+// pagination) using these three classes, so a rhythm/spacing pass here
+// reaches all of them at once instead of needing per-page changes. This
+// was previously just `.list-body { margin: 10px 0 }` - the query and
+// pagination cards had no margin rule of their own at all, so the
+// visible spacing between all three was really just list-body's own
+// top/bottom margin doing double duty, not a deliberate rhythm. Giving
+// all three the same bottom margin is simpler than first/last-child
+// selectors and doesn't care about DOM order.
+.list-query, .list-body, .list-page {
+  margin-bottom: 16px;
 }
 
 .list-query {
+  .el-form-item {
+    margin-bottom: 12px;
+  }
+
   .el-select {
     --el-select-width: 160px;
   }
@@ -44,6 +52,11 @@ body {
   .el-input {
     --el-input-width: 160px;
   }
+}
+
+.dialog-form {
+  max-width: 600px;
+  margin: 20px auto;
 }
 
 .table-actions {
