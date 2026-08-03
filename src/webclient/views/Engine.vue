@@ -64,15 +64,33 @@
   // ourselves, right before loading the engine, is the actual fix -
   // removed again on logout so it doesn't affect Login.vue's own
   // relative resource resolution afterward.
+  // Adding <base href="/webclient/engine/"> also repoints the browser's
+  // own automatic favicon probe (the one it does when it can't find a
+  // usable <link rel="icon">) at that same engine directory instead of
+  // the site root - confirmed live as a 404 for
+  // /webclient/engine/favicon.ico. webclient.html's existing
+  // `<link rel="icon" href="/favicon.ico">` uses an absolute href so it
+  // isn't affected by <base> itself, but re-asserting it (with an
+  // absolute href built from location.origin, not a bare "/") right
+  // after inserting <base> is cheap insurance against the browser
+  // re-running its favicon lookup once <base> changes the document's
+  // resolution context.
   let baseEl = null
+  let iconEl = null
   function setDocumentBase (href) {
     baseEl = document.querySelector('base') || document.createElement('base')
     baseEl.setAttribute('href', href)
     if (!baseEl.parentNode) document.head.prepend(baseEl)
+
+    iconEl = document.querySelector('link[rel="icon"]') || document.createElement('link')
+    iconEl.setAttribute('rel', 'icon')
+    iconEl.setAttribute('href', new URL('/favicon.ico', window.location.origin).href)
+    if (!iconEl.parentNode) document.head.appendChild(iconEl)
   }
   function clearDocumentBase () {
     if (baseEl && baseEl.parentNode) baseEl.parentNode.removeChild(baseEl)
     baseEl = null
+    iconEl = null
   }
 
   onMounted(async () => {

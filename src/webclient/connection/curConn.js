@@ -398,9 +398,12 @@ export default class CurConn {
         const cb = msg?.clipboard
         if (cb.compress) {
           const { decompress } = await import('./common')
-          const c = await decompress(cb.content)
-          if (!c) continue
-          cb.content = c
+          try {
+            cb.content = await decompress(cb.content)
+          } catch (e) {
+            console.error('Failed to decompress clipboard content', e)
+            continue
+          }
         }
         try {
           globals.copyToClipboard(new TextDecoder().decode(cb.content))
@@ -410,9 +413,12 @@ export default class CurConn {
       } else if (msg?.cursor_data) {
         const { decompress } = await import('./common')
         const cd = msg?.cursor_data
-        const c = await decompress(cd.colors)
-        if (!c) continue
-        cd.colors = c
+        try {
+          cd.colors = await decompress(cd.colors)
+        } catch (e) {
+          console.error('Failed to decompress cursor colors', e)
+          continue
+        }
         globals.pushEvent('cursor_data', cd)
       } else if (msg?.cursor_id) {
         globals.pushEvent('cursor_id', { id: msg?.cursor_id })
@@ -1435,14 +1441,14 @@ export default class CurConn {
     let data = block.data
     if (block.compressed) {
       const { decompress } = await import('./common')
-      const d = await decompress(data)
-      if (!d) {
-        console.error('Failed to decompress download block - zstd decoder not wired up yet, aborting download')
-        globals.pushEvent('job_error', { id: String(block.id), err: 'This file was sent compressed, which this web client cannot decompress yet.', file_num: String(block.file_num) })
+      try {
+        data = await decompress(data)
+      } catch (e) {
+        console.error('Failed to decompress download block', e)
+        globals.pushEvent('job_error', { id: String(block.id), err: 'Failed to decompress a block of this file: ' + e.message, file_num: String(block.file_num) })
         this._downloads.delete(block.id)
         return
       }
-      data = d
     }
     dl.chunks.push(data)
     dl.receivedSize += data.length
@@ -1546,12 +1552,12 @@ export default class CurConn {
       let bytes = tr.data.data
       if (tr.data.compressed) {
         const { decompress } = await import('./common')
-        const d = await decompress(bytes)
-        if (!d) {
-          console.warn('Dropping compressed terminal output - zstd decoder not wired up yet, see common.js')
+        try {
+          bytes = await decompress(bytes)
+        } catch (e) {
+          console.warn('Dropping compressed terminal output - decompress failed', e)
           return
         }
-        bytes = d
       }
       globals.pushEvent('terminal_response', {
         type: 'data',
