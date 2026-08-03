@@ -31,15 +31,15 @@
     <el-card class="list-body" shadow="hover">
       <el-table :data="listRes.list" v-loading="listRes.loading" border size="small" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" align="center"/>
-        <el-table-column prop="id" label="ID" align="center" width="150">
+        <el-table-column prop="id" label="ID" align="center" min-width="150">
           <template #default="{row}">
             <span>{{ row.id }} <el-icon @click="handleClipboard(row.id, $event)"><CopyDocument/></el-icon></span>
           </template>
         </el-table-column>
-        <el-table-column prop="cpu" label="CPU" align="center" width="100" show-overflow-tooltip/>
-        <el-table-column prop="hostname" :label="T('Hostname')" align="center" width="120"/>
-        <el-table-column prop="memory" :label="T('Memory')" align="center" width="120"/>
-        <el-table-column prop="os" :label="T('Os')" align="center" width="120" show-overflow-tooltip/>
+        <el-table-column prop="cpu" label="CPU" align="center" min-width="100" show-overflow-tooltip/>
+        <el-table-column prop="hostname" :label="T('Hostname')" align="center" min-width="120"/>
+        <el-table-column prop="memory" :label="T('Memory')" align="center" min-width="120"/>
+        <el-table-column prop="os" :label="T('Os')" align="center" min-width="120" show-overflow-tooltip/>
         <el-table-column prop="last_online_time" :label="T('LastOnlineTime')" align="center" min-width="120">
           <template #default="{row}">
             <div class="last_oline_time">
@@ -48,19 +48,28 @@
           </template>
         </el-table-column>
         <el-table-column prop="last_online_ip" :label="T('LastOnlineIp')" align="center" min-width="120"/>
-        <el-table-column prop="username" :label="T('Username')" align="center" width="120"/>
-        <el-table-column prop="uuid" :label="T('Uuid')" align="center" width="120" show-overflow-tooltip/>
-        <el-table-column prop="version" :label="T('Version')" align="center" width="80"/>
-        <el-table-column prop="alias" :label="T('Alias')" align="center" width="80"/>
-        <el-table-column prop="created_at" :label="T('CreatedAt')" align="center" width="150"/>
-        <el-table-column prop="updated_at" :label="T('UpdatedAt')" align="center" width="150"/>
-        <el-table-column :label="T('Actions')" align="center" width="500" class-name="table-actions" fixed="right">
+        <el-table-column prop="username" :label="T('Username')" align="center" min-width="120"/>
+        <el-table-column prop="uuid" :label="T('Uuid')" align="center" min-width="120" show-overflow-tooltip/>
+        <el-table-column prop="version" :label="T('Version')" align="center" min-width="80"/>
+        <el-table-column prop="alias" :label="T('Alias')" align="center" min-width="80"/>
+        <el-table-column prop="created_at" :label="T('CreatedAt')" align="center" min-width="150"/>
+        <el-table-column prop="updated_at" :label="T('UpdatedAt')" align="center" min-width="150"/>
+        <el-table-column :label="T('Actions')" align="center" min-width="220" class-name="table-actions" fixed="right">
           <template #default="{row}">
-            <el-button type="success" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
-            <el-button v-if="appStore.setting.appConfig.web_client" type="success" @click="toWebClientLink(row)">Web Client</el-button>
-            <el-button type="primary" @click="toAddressBook(row)">{{ T('AddToAddressBook') }}</el-button>
-            <el-button @click="toView(row)">{{ T('View') }}</el-button>
-            <!--            <el-button type="danger" @click="del(row)">{{ T('Delete') }}</el-button>-->
+            <el-button type="success" size="small" @click="connectByClient(row.id)">{{ T('Link') }}</el-button>
+            <el-button v-if="appStore.setting.appConfig.web_client" type="success" size="small" @click="toWebClientLink(row)">Web Client</el-button>
+            <el-dropdown trigger="click" @command="cmd => handleRowCommand(cmd, row)">
+              <el-button size="small">
+                {{ T('More') }}
+                <el-icon class="el-icon--right"><ArrowDown/></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="addressBook">{{ T('AddToAddressBook') }}</el-dropdown-item>
+                  <el-dropdown-item command="view">{{ T('View') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -189,7 +198,7 @@
   import { useRepositories as useABRepositories } from '@/views/address_book/index'
   import { useAppStore } from '@/store/app'
   import { connectByClient } from '@/utils/peer'
-  import { CopyDocument } from '@element-plus/icons'
+  import { ArrowDown, CopyDocument } from '@element-plus/icons'
   import { handleClipboard } from '@/utils/clipboard'
   import { batchCreateFromPeers } from '@/api/my/address_book'
 
@@ -316,6 +325,14 @@
   const toAddressBook = (peer) => {
     fromPeer(peer)
     ABFormVisible.value = true
+  }
+
+  // Same actions-column collapse as views/peer/index.vue - AddToAddressBook
+  // and View moved into this dropdown so the column doesn't need a 500px
+  // fixed width.
+  const handleRowCommand = (command, row) => {
+    if (command === 'addressBook') toAddressBook(row)
+    else if (command === 'view') toView(row)
   }
 
   const multipleSelection = ref([])
